@@ -32,7 +32,7 @@ translation underneath.
 
 > **Status: 0.1, in development.** Recognition has been checked end to end with real Whisper on English
 > and Chinese speech from text-to-speech, including fast, noisy, music-backed and mixed-language
-> speech. The rest of the pipeline, live mode included, is covered by 111 tests on synthetic audio. Live
+> speech. The rest of the pipeline, live mode included, is covered by 112 tests on synthetic audio. Live
 > capture from a real sound card has not been tested by the author yet, and translation only against a
 > stand-in endpoint, not a real model. See [POLISH_LOG.md](POLISH_LOG.md).
 
@@ -66,16 +66,17 @@ Drag the caption bar anywhere. Double-click it or press Esc to stop.
 
 ### Which model
 
-Live, the recognizer re-reads the current sentence as it grows, so the time one reading takes is how
-far the captions run behind. Here is the time to read one 8-second window on a laptop CPU (int8, an
-otherwise idle machine). A busy machine can take twice as long.
+Live, the recognizer re-reads the current sentence as it grows. How far behind the speech that puts
+the captions, measured on a laptop CPU (int8, otherwise idle): a minute of English played in real time
+through the same capture thread and queue as `livesub live`. The figures are medians; a busy machine
+can take twice as long.
 
-| model | size | 8 s window on a CPU | live on a CPU |
-|---|---|---|---|
-| `tiny` | 75 MB | 0.33 s | quick, least accurate |
-| `base` | 145 MB | 0.60 s | about 1 s behind (**default on a CPU**) |
-| `small` | 480 MB | 1.7 s | about 2 s behind (**default on a GPU and for files**) |
-| `medium`, `large-v3`, `turbo` | 1.5–3 GB | — | GPU only |
+| model | size | a word appears (dimmed) | and is final | |
+|---|---|---|---|---|
+| `tiny` | 75 MB | 0.7 s after it is said | 1.1 s | least accurate |
+| `base` | 145 MB | 1.2 s | 1.8 s | **default on a CPU** (Chinese: 1.6 s and 2.6 s) |
+| `small` | 480 MB | 2.6 s | 3.7 s | **default on a GPU and for files** |
+| `medium`, `large-v3`, `turbo` | 1.5–3 GB | — | — | GPU only |
 
 How accurate they are on test speech made with text-to-speech (WER, word errors; CER, character errors
 for Chinese). That is easier than real speech, so treat these numbers as a floor:
@@ -138,7 +139,7 @@ audio ─▶ resample to 16 kHz ─▶ voice activity ─▶ speech buffer ─(e
 ```bash
 uv venv && uv pip install numpy pytest
 uv run pytest
-python scripts/mutate.py      # test the tests: 57 planted bugs, each must make a test fail
+python scripts/mutate.py      # test the tests: 60 planted bugs, each must make a test fail
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how the tests work and how to check against real Whisper

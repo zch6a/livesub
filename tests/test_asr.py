@@ -107,6 +107,9 @@ def test_transcribe_puts_words_on_the_stream_clock_and_drops_hallucinations():
     assert join(words) == "Hello there." and words[0].start == 10.0
     kw = w.model.calls[0]
     assert kw["word_timestamps"] and not kw["vad_filter"] and not kw["condition_on_previous_text"]
+    assert kw["max_new_tokens"] == 8 + 16  # one second of audio
+    w.transcribe(np.zeros(16000 * 30, np.float32))
+    assert w.model.calls[-1]["max_new_tokens"] == 256
     assert w.language == "en"
 
 

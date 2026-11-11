@@ -68,7 +68,9 @@ MUTANTS = [
     ("src/livesub/asr.py", "prompt = SIMPLIFIED_PROMPT + prompt", "prompt = prompt"),
     # live command
     ("src/livesub/cli.py", "check_save_path(args.save)", "pass"),
-    ("src/livesub/cli.py", "cap.feed(block, recognize=audio.empty())", "cap.feed(block)"),
+    ("src/livesub/live.py", "self.captioner.feed(block, recognize=self.audio.empty())", "self.captioner.feed(block)"),
+    ("src/livesub/live.py", "self.transcript.translated(cue)", "pass"),
+    ("src/livesub/live.py", "self.worker.close()  # every cue is queued by now: wait for their translations", "pass"),
     ("src/livesub/cli.py", "args.llm_key or os.environ.get(\"LIVESUB_LLM_API_KEY\")", "args.llm_key"),
     # round 3: subtitle rules, recognizer settings, trimming
     ("src/livesub/captions.py", "return CJK_WIDTH if is_cjk_text(text) else LATIN_WIDTH", "return LATIN_WIDTH"),
@@ -81,6 +83,7 @@ MUTANTS = [
     ("src/livesub/pipeline.py", "cut = _quietest(levels, frame, a + 0.8 * max_len, a + max_len)", "cut = a + max_len"),
     ("src/livesub/cli.py", "temperature = 0.0 if args.command == \"live\" else (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)", "temperature = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)"),
     ("src/livesub/asr.py", "if s.no_speech_prob > 0.9:", "if False:"),
+    ("src/livesub/asr.py", "max_new_tokens=min(440, int(8 * len(audio) / 16000) + 16),", "max_new_tokens=448,"),
     ("src/livesub/asr.py", "need = (6 if len(unit[0]) == 1 and is_wide(unit[0]) else limit) if n == 1 else 3", "need = limit if n == 1 else 99"),
     # translation
     ("src/livesub/translate.py", "return urllib.request.build_opener(urllib.request.ProxyHandler({}))", "return urllib.request.build_opener()"),

@@ -13,6 +13,10 @@ SIMPLIFIED_PROMPT = "以下是普通话的句子，使用简体中文。"
 
 
 class Transcriber(Protocol):
+    def warm_up(self, language: str | None = None) -> None:
+        """One throwaway reading, so that the first real one is not slowed by setting up."""
+        self.model.transcribe(np.zeros(16000, np.float32), language=language or "en", beam_size=1, temperature=0.0)
+
     def transcribe(self, audio: np.ndarray, *, offset: float = 0.0, prompt: str = "", language: str | None = None) -> list[Word]:
         """Words in 16 kHz mono `audio`, with times on the stream's clock (`offset` + time in the audio)."""
         ...
@@ -48,6 +52,10 @@ class FasterWhisper:
         self.temperature = temperature
         self.language: str | None = None
 
+    def warm_up(self, language: str | None = None) -> None:
+        """One throwaway reading, so that the first real one is not slowed by setting up."""
+        self.model.transcribe(np.zeros(16000, np.float32), language=language or "en", beam_size=1, temperature=0.0)
+
     def transcribe(self, audio: np.ndarray, *, offset: float = 0.0, prompt: str = "", language: str | None = None) -> list[Word]:
         if (language or self.language) == "zh" and not any(is_wide(c) for c in prompt):
             # Whisper often writes Mandarin in Traditional characters; a Simplified prompt steers it.
@@ -55,6 +63,10 @@ class FasterWhisper:
         segments, info = self.model.transcribe(
             audio, language=language, initial_prompt=prompt or None, beam_size=self.beam_size,
             temperature=self.temperature, word_timestamps=True, vad_filter=False, condition_on_previous_text=False,
+            # Speech rarely needs more than 8 tokens a second. Without a cap, a window ending on a word
+            # cut in half sometimes made the decoder run on for 2.5 s whatever the window's length,
+            # which set the worst-case lag of live captions (3.7 s readings, down to 1.4 s with it).
+            max_new_tokens=min(440, int(8 * len(audio) / 16000) + 16),
         )
         self.language = info.language
         words: list[Word] = []

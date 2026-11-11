@@ -124,3 +124,23 @@ Checked against the literature and comparable projects: an agent read the Machá
 - **Re-scored with real Whisper.** Live with `base`: music 3.2%, Chinese 6.9%, the rest unchanged. Files with `small`: clean English and music now 0%, Chinese 1.1%. The README tables are updated.
 - Every change has a test. Several fail on the old code: the single-word match, the opening bracket on a three-line cue, and sentence trimming (checked with mutants).
 - 111 tests, 57 of 57 mutants caught, ruff clean.
+
+## Round 4
+
+Performance and a full read of the code.
+
+- **An hour of speech** (synthetic, with the scripted recognizer) through the live loop:
+  - every word came out once and in order;
+  - the loop itself costs about 3 ms per second of audio;
+  - memory grows only by the list of finished cues (0.2 MB per 10 minutes, kept for `--save`); the
+    committed words kept for alignment stay at 50.
+- **Real lag, measured.** A minute of English and the Chinese recording were played in real time through the same capture thread, queue and deferral as `livesub live`, with real Whisper. For each word I measured how long after it is said it first appears and when its cue is final. The README's "about 1 s behind" for `base` was wrong: words appeared 2.5 s after being said (median) and cues were final after 3.8 s, with single readings of up to 4.3 s (6.0 s in Chinese).
+  - **Fixed: the slow readings.** Logging them showed about 2.5 s whatever the window's length, even on a 1.5 s window, and nearly all ended on a word cut in half. The decoder ran on without finding the end of the text. Capping new tokens at 8 a second of audio (plus 16) removed the spikes: the slowest reading dropped from 3.7 s to 1.4 s. Accuracy on every test recording is unchanged, and live mode now runs faster than real time on all of them (Chinese 1.49× → 0.88×).
+  - **A warm-up reading at start**, so the first real reading does not pay for setting up.
+  - Tried and **not adopted**: a 0.5 s step (words appear a little sooner, but are final later) and an 8 s buffer (worse on both counts, since shorter context means more re-reading).
+  - Now, with `base` on a laptop CPU (median): a word appears 1.2 s after it is said and is final at 1.8 s; in Chinese, 1.6 s and 2.6 s. With `tiny`: 0.7 s and 1.1 s. With `small`: 2.6 s and 3.7 s. The README tables show these measured figures instead of guesses.
+- **Code read**:
+  - `cmd_live` had grown to 103 statements, with complexity 37: display, bookkeeping and threading all in one closure-heavy function. It is now `live.py`: a `ConsoleView` and an `OverlayView` with the same four methods, a thread-safe `Transcript`, and a `LiveSession` that owns the two threads. `cmd_live` only checks the setup and starts the session.
+  - Ruff's complexity rules (C901, PLR0912, PLR0915) pass on all of `src`.
+- **Tests**: live translation end to end. A slow fake translator (0.6 s a reply) checks that the overlay shows translations, and that the saved file has every cue translated even when the last translation arrives after stopping. Without that slowness, the mutant that skips waiting for translations had survived. The token cap is checked too.
+- 112 tests, 60 of 60 mutants caught, ruff clean.

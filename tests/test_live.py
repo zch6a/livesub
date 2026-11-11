@@ -159,3 +159,18 @@ def test_the_overlay_closes_safely_from_another_thread(monkeypatch):
     o.run()
     o.close()  # and once more from the window's own thread after it is gone
     assert not errors
+
+
+def test_translations_reach_the_overlay_and_the_saved_file(tmp_path, monkeypatch):
+    from test_translate import FakeLLM
+
+    llm = FakeLLM(reply="译文", delay=0.6)  # slow, like a real model: the last one arrives after stopping
+    out = tmp_path / "both.srt"
+    try:
+        code, _ = run_live(["--save", str(out), "--translate-to", "zh", "--llm-url", llm.url, "--llm-model", "m"], monkeypatch)
+    finally:
+        llm.close()
+    assert code == 0
+    srt = out.read_text(encoding="utf-8")
+    assert srt.count("译文") == 2, srt  # both cues, translated, as the session ended
+    assert "译文" in FakeOverlay.instances[-1].translations

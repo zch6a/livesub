@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
@@ -10,14 +11,15 @@ from livesub.translate import ChatTranslator, TranslationError, clean
 class FakeLLM:
     """A local OpenAI-compatible endpoint that replies with a canned answer and records requests."""
 
-    def __init__(self, reply="你好。", status=200):
-        self.reply, self.status, self.requests = reply, status, []
+    def __init__(self, reply="你好。", status=200, delay=0.0):
+        self.reply, self.status, self.requests, self.delay = reply, status, [], delay
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 fake.requests.append({"path": self.path, "body": body, "auth": self.headers.get("Authorization")})
+                time.sleep(fake.delay)
                 data = json.dumps({"choices": [{"message": {"content": fake.reply}}]}).encode()
                 self.send_response(fake.status)
                 self.send_header("Content-Type", "application/json")

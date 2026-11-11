@@ -10,15 +10,13 @@ from __future__ import annotations
 
 import argparse
 import os
-import queue
 import sys
-import threading
 from pathlib import Path
 
 from . import __version__
 from .audio import RATE, read_audio, resample
 from .captions import Cue, to_srt, to_vtt
-from .pipeline import LiveCaptioner, TranslationWorker, run_file, transcribe_file
+from .pipeline import LiveCaptioner, run_file, transcribe_file
 from .translate import ChatTranslator, TranslationError
 
 
@@ -166,131 +164,41 @@ def check_save_path(path: Path | None) -> None:
 
 
 def cmd_live(args, capture=None, overlay_class=None) -> int:
+    from .live import ConsoleView, LiveSession, OverlayView
+
     if capture is None:
         from . import capture
+    # Everything that can be wrong is found before the model loads: the save path, the translator,
+    # the sound device, the display.
     check_save_path(args.save)
     translator = make_translator(args)
-    mic = capture.open_source(args.source, args.input_device)  # a wrong device fails before the model loads
-    overlay = None
-    if not args.console:
+    mic = capture.open_source(args.source, args.input_device)
+    if args.console:
+        view = ConsoleView()
+    else:
         if overlay_class is None:
             from .overlay import Overlay as overlay_class
-        overlay = overlay_class(font_size=args.font_size)  # so does a missing display
+        view = OverlayView(overlay_class(font_size=args.font_size))
     transcriber = make_transcriber(args)
-    stop = threading.Event()
-    done: list[Cue] = []
-    lock = threading.Lock()
-    last = {"cue": ""}
-    failure: list[str] = []
-
-    if overlay is None:
-        def show(committed: str, tentative: str) -> None:
-            line = (committed + " " + tentative).strip()
-            print("\r\033[K" + line[-110:], end="", flush=True)
-
-        def show_cue(c: Cue) -> None:
-            print("\r\033[K" + c.text, flush=True)
-
-        def show_translation(c: Cue) -> None:
-            print("\r\033[K   → " + (c.translation or ""), flush=True)
-    else:
-        def show(committed: str, tentative: str) -> None:
-            if committed or tentative:
-                overlay.show_text(committed, tentative)
-            else:
-                overlay.show_text(last["cue"])
-
-        def show_cue(c: Cue) -> None:
-            pass
-
-        def show_translation(c: Cue) -> None:
-            if c.translation:
-                overlay.show_translation(c.translation)
-
-    def translated(c: Cue) -> None:
-        with lock:
-            for i in range(len(done) - 1, -1, -1):
-                if done[i].start == c.start and done[i].text == c.text:
-                    done[i] = c
-                    break
-        show_translation(c)
-
-    worker = TranslationWorker(translator, args.translate_to, translated,
-                               on_error=lambda e: print(f"\ntranslation failed: {e}", file=sys.stderr)) if translator else None
-
-    def on_cue(c: Cue) -> None:
-        last["cue"] = c.text
-        with lock:
-            done.append(c)
-        show_cue(c)
-        if worker:
-            worker.submit(c)
-
-    cap = LiveCaptioner(transcriber, step=args.step, language=args.language, on_cue=on_cue, on_partial=show)
-    audio: queue.Queue = queue.Queue()
-
-    def fail(what: str, e: BaseException) -> None:
-        failure.append(f"{what}: {e}")
-        stop.set()
-        if overlay:
-            overlay.close()
-
-    def record() -> None:
-        # Only reads the device, so that nothing is lost while a reading runs on the other thread.
-        try:
-            for block in capture.blocks(args.source, args.input_device, mic=mic):
-                audio.put(block)
-                if stop.is_set():
-                    break
-        except Exception as e:  # noqa: BLE001 - report and stop rather than die silently in a thread
-            fail("audio capture stopped", e)
-        finally:
-            audio.put(None)
-
-    def recognize() -> None:
-        try:
-            while (block := audio.get()) is not None and not stop.is_set():
-                # Behind (blocks queued up during a slow reading)? Take them all in, then read once.
-                cap.feed(block, recognize=audio.empty())
-            cap.close()  # finish what was being said
-        except Exception as e:  # noqa: BLE001
-            fail("recognition failed", e)
-        finally:
-            stop.set()
-            if overlay:
-                overlay.close()
-
-    threads = [threading.Thread(target=record, daemon=True, name="livesub-capture"),
-               threading.Thread(target=recognize, daemon=True, name="livesub-recognize")]
-    for t in threads:
-        t.start()
+    if hasattr(transcriber, "warm_up"):
+        transcriber.warm_up(args.language)
+    session = LiveSession(capture.blocks(args.source, args.input_device, mic=mic), transcriber, view,
+                          step=args.step, language=args.language, translator=translator, target=args.translate_to)
     src = "what this computer plays" if args.source == "loopback" else "the microphone"
-    print(f"listening to {src}; {'Ctrl+C' if overlay is None else 'double-click the captions or press Esc'} to stop", file=sys.stderr)
-    try:
-        if overlay:
-            overlay.run()
-        else:
-            while not stop.wait(0.2):
-                pass
-    except KeyboardInterrupt:
-        pass
-    stop.set()
-    audio.put(None)
-    for t in threads:
-        t.join(60)  # the last reading may take a few seconds on a CPU
-    if worker:
-        worker.close()  # every caption is in the queue by now; wait for their translations
+    how = "Ctrl+C" if args.console else "double-click the captions or press Esc"
+    print(f"listening to {src}; {how} to stop", file=sys.stderr)
+    session.run()
+    cues = session.transcript.snapshot()
     if args.save:
-        with lock:
-            write_subtitles(args.save, list(done), "both" if translator else "original")
-        print(f"\n{len(done)} captions -> {args.save}", file=sys.stderr)
-    if failure:
-        print(f"\nlivesub: {failure[0]}", file=sys.stderr)
+        write_subtitles(args.save, cues, "both" if translator else "original")
+        print(f"\n{len(cues)} captions -> {args.save}", file=sys.stderr)
+    if session.failure:
+        print(f"\nlivesub: {session.failure}", file=sys.stderr)
         return 1
     return 0
 
 
-def cmd_devices(args) -> int:
+def cmd_devices(_args) -> int:
     from .capture import list_devices
 
     for kind, names in list_devices().items():
