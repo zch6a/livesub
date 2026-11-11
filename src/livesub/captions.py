@@ -1,9 +1,10 @@
 """From committed words to subtitle cues: line breaking, cue boundaries, SRT and WebVTT.
 
-Subtitle conventions (as in broadcasters' and Netflix's style guides): at most two lines of about 42
-characters (16 full-width characters for Chinese and Japanese, which count double here), a cue on
-screen for at least a second and at most about seven, and a new cue at the end of a sentence or after
-a pause.
+Following Netflix's timed-text style guides: at most two lines of 42 characters, or 16 for Chinese and
+Japanese (which count double here, so 32 columns); a two-line cue broken where it reads best rather than
+filled greedily; on screen for at least 5/6 s, at most 7 s, and long enough to read (20 characters per
+second, 9 for Chinese); two frames between cues, and no gap shorter than half a second. A new cue starts
+at the end of a sentence or after a pause.
 """
 
 from __future__ import annotations
@@ -15,8 +16,11 @@ from .streaming import Word, join
 
 SENTENCE_END = tuple(".!?。！？…")
 CLAUSE_END = tuple(",;:，、；：")
-# Kinsoku: punctuation that must not begin a line; it stays with the character before it.
-NO_LINE_START = set("，。、！？；：）」』】》〉,.!?;:)]}…%")
+# Kinsoku: punctuation that must not begin a line (it stays with the character before it), and opening
+# brackets and quotes that must not end one (they go with the character after them).
+NO_LINE_START = set("，。、！？；：）」』】》〉”’,.!?;:)]}…%")
+NO_LINE_END = set("（「『【《〈“‘([{")
+LATIN_WIDTH, CJK_WIDTH = 42, 32  # columns: 42 Latin characters, 16 Chinese or Japanese ones
 
 
 def is_wide(ch: str) -> bool:
@@ -26,6 +30,16 @@ def is_wide(ch: str) -> bool:
 def width(text: str) -> int:
     """Display width in columns: CJK characters take two, combining marks none."""
     return sum(2 if is_wide(c) else 0 if unicodedata.combining(c) else 1 for c in text)
+
+
+def is_cjk_text(text: str) -> bool:
+    chars = [c for c in text if not c.isspace()]
+    return bool(chars) and sum(is_wide(c) for c in chars) * 3 >= len(chars)
+
+
+def line_width(text: str) -> int:
+    """How many columns a line of this text may take: 16 characters of Chinese, 42 of English."""
+    return CJK_WIDTH if is_cjk_text(text) else LATIN_WIDTH
 
 
 def _tokens(text: str) -> list[tuple[str, bool]]:
@@ -54,16 +68,51 @@ def _tokens(text: str) -> list[tuple[str, bool]]:
     return out
 
 
-def wrap(text: str, max_width: int = 42) -> list[str]:
-    """Greedy line breaking that never splits a Latin word (unless it alone is too long) and never
-    starts a line with closing punctuation."""
+def wrap(text: str, max_width: int | None = None) -> list[str]:
+    """Break text into lines of at most `max_width` columns (default: by script, see `line_width`).
+
+    Never splits a Latin word (unless it alone is too long), never starts a line with closing
+    punctuation or ends one with an opening bracket, and when two lines are needed, breaks where the
+    two read best: after punctuation if possible, the lines about equal, the top one rather shorter."""
+    max_width = max_width or line_width(text)
+    lines = _greedy(text, max_width)
+    if len(lines) == 2:
+        lines = _balanced(text, max_width) or lines
+    return lines
+
+
+def _balanced(text: str, max_width: int) -> list[str] | None:
+    toks = _tokens(text.strip())
+    best: tuple[float, list[str]] | None = None
+    for k in range(1, len(toks)):
+        if toks[k][0][0] in NO_LINE_START or toks[k - 1][0][-1] in NO_LINE_END:
+            continue
+        top = _joined(toks[:k])
+        bottom = _joined([(toks[k][0], False)] + toks[k + 1:])
+        w1, w2 = width(top), width(bottom)
+        if w1 > max_width or w2 > max_width:
+            continue
+        score = abs(w1 - w2) + (4 if w1 > w2 else 0) - (12 if top.endswith(SENTENCE_END + CLAUSE_END) else 0)
+        if best is None or score < best[0]:
+            best = (score, [top, bottom])
+    return best[1] if best else None
+
+
+def _joined(toks: list[tuple[str, bool]]) -> str:
+    return "".join((" " if space and i else "") + tok for i, (tok, space) in enumerate(toks))
+
+
+def _greedy(text: str, max_width: int) -> list[str]:
     lines: list[str] = []
     line = ""
     for tok, space in _tokens(text.strip()):
         piece = (" " if space and line else "") + tok
         if line and width(line + piece) > max_width and tok[0] not in NO_LINE_START:
+            carry = ""
+            if line[-1] in NO_LINE_END and len(line) > 1:  # an opening bracket goes with what it opens
+                line, carry = line[:-1], line[-1]
             lines.append(line)
-            line, piece = "", tok
+            line, piece = carry, tok
         while width(piece) > max_width:  # one unit longer than a line: hard split
             cut = 1
             while cut < len(piece) and width(piece[: cut + 1]) <= max_width:
@@ -87,7 +136,7 @@ class Cue:
 class CueBuilder:
     """Collects committed words and closes a cue at a sentence end, a pause, or when it is full."""
 
-    def __init__(self, max_width: int = 42, max_lines: int = 2, max_gap: float = 1.2, max_duration: float = 7.0):
+    def __init__(self, max_width: int | None = None, max_lines: int = 2, max_gap: float = 1.2, max_duration: float = 7.0):
         self.max_width, self.max_lines = max_width, max_lines
         self.max_gap, self.max_duration = max_gap, max_duration
         self.words: list[Word] = []
@@ -124,14 +173,23 @@ class CueBuilder:
         return Cue(done[0].start, done[-1].end, join(done))
 
 
-def display_times(cues: list[Cue], min_duration: float = 1.0, lead_out: float = 0.3) -> list[Cue]:
-    """Times for showing: each cue stays a little after its last word and at least `min_duration`,
-    but never overlaps the next one."""
+FRAME_GAP = 2 / 24  # two frames between cues, so the eye notices the change
+
+
+def display_times(cues: list[Cue], min_duration: float = 5 / 6, max_duration: float = 7.0, lead_out: float = 0.3) -> list[Cue]:
+    """Times for showing a cue in a subtitle file: from its first word until a little after its last,
+    and long enough to read (20 characters a second, 9 for Chinese and Japanese), within 5/6 s to 7 s.
+    Never closer than two frames to the next cue; a gap shorter than half a second is closed to two
+    frames, since a blink between two cues is only distracting."""
     out = []
     for i, c in enumerate(cues):
-        end = max(c.end + lead_out, c.start + min_duration)
+        chars = len([ch for ch in c.text if not ch.isspace()])
+        reading = chars / (9 if is_cjk_text(c.text) else 20)
+        end = max(c.end + lead_out, c.start + min_duration, c.start + reading)
+        end = min(end, max(c.end, c.start + max_duration))
         if i + 1 < len(cues):
-            end = min(end, cues[i + 1].start)
+            limit = cues[i + 1].start - FRAME_GAP
+            end = limit if end > limit or limit - end < 0.5 else end
         out.append(replace(c, end=max(end, c.start + 0.001)))
     return out
 
@@ -144,7 +202,7 @@ def _timestamp(t: float, sep: str) -> str:
     return f"{h:02}:{m:02}:{s:02}{sep}{ms:03}"
 
 
-def _body(c: Cue, mode: str, max_width: int) -> str:
+def _body(c: Cue, mode: str, max_width: int | None) -> str:
     original = "\n".join(wrap(c.text, max_width))
     translated = "\n".join(wrap(c.translation, max_width)) if c.translation else ""
     if mode == "translation":
@@ -154,13 +212,14 @@ def _body(c: Cue, mode: str, max_width: int) -> str:
     return original
 
 
-def to_srt(cues: list[Cue], mode: str = "original", max_width: int = 42) -> str:
-    """`mode`: "original", "translation" (falls back to the original where there is none) or "both"."""
+def to_srt(cues: list[Cue], mode: str = "original", max_width: int | None = None) -> str:
+    """`mode`: "original", "translation" (falls back to the original where there is none) or "both"
+    (each language on up to two lines of its own, so up to four in all)."""
     blocks = [f"{i}\n{_timestamp(c.start, ',')} --> {_timestamp(c.end, ',')}\n{_body(c, mode, max_width)}\n"
               for i, c in enumerate(display_times(cues), start=1)]
     return "\n".join(blocks)
 
 
-def to_vtt(cues: list[Cue], mode: str = "original", max_width: int = 42) -> str:
+def to_vtt(cues: list[Cue], mode: str = "original", max_width: int | None = None) -> str:
     blocks = [f"{_timestamp(c.start, '.')} --> {_timestamp(c.end, '.')}\n{_body(c, mode, max_width)}\n" for c in display_times(cues)]
     return "WEBVTT\n\n" + "\n".join(blocks)

@@ -133,16 +133,24 @@ def test_speech_regions_cover_every_word_and_skip_the_silence():
     regions = speech_regions(render(TALK, 18.0))
     for w in TALK:
         assert any(a <= w.start and w.end <= b for a, b in regions), w
-    assert sum(b - a for a, b in regions) < 0.8 * 18.0
-    assert all(b - a <= 30.0 for a, b in regions)
+    assert all(r1[1] <= r2[0] for r1, r2 in zip(regions, regions[1:], strict=False)), "no audio is read twice"
+    # A long silence is skipped, apart from the padding on either side.
+    spaced = script("first part.", 1.0) + script("second part.", 12.0)
+    regions = speech_regions(render(spaced, 15.0))
+    assert len(regions) == 2 and regions[1][0] - regions[0][1] > 8.0
+    assert regions[1][0] <= 12.0 - 0.9, "a full second of lead-in before speech"
 
 
 def test_long_speech_is_split_into_regions_whisper_can_read():
     from livesub.pipeline import speech_regions
 
     words = script(" ".join(f"w{i}" for i in range(150)), 0.5)  # 60 s without a pause
-    regions = speech_regions(render(words, 62.0))
-    assert len(regions) >= 2 and all(b - a <= 30.0 for a, b in regions)
+    assert len(speech_regions(render(words, 62.0))) == 1  # faster-whisper handles 30 s windows itself
+    regions = speech_regions(render(words, 62.0), max_len=25.0)
+    assert len(regions) >= 3 and all(b - a <= 25.0 for a, b in regions)
+    # Split at a quiet moment: between words, not inside one.
+    for _, b in regions[:-1]:
+        assert not any(w.start + 0.05 < b < w.end - 0.05 for w in words), b
 
 
 def test_a_file_is_read_once_per_region_and_gives_the_same_captions():
@@ -153,3 +161,17 @@ def test_a_file_is_read_once_per_region_and_gives_the_same_captions():
     assert " ".join(c.text for c in cues) == join(TALK)
     assert len(asr.calls) == 3  # one per utterance, against dozens in the live loop
     assert "flicker." in asr.calls[-1][2]  # earlier text is the prompt
+
+
+def test_a_long_talk_is_cut_at_sentence_ends():
+    # 40 s without a pause, a sentence every six words, and an 8 s window: each cut falls after a
+    # full stop, so every later window starts with the first word of a sentence.
+    text = " ".join(f"w{i}{'.' if i % 6 == 5 else ''}" for i in range(100))
+    words = script(text, 0.5)
+    cap, asr, cues, _ = caption(words, 42.0, max_buffer=8.0)
+    assert " ".join(c.text for c in cues) == text
+    trimmed = [offset for offset, _, _ in asr.calls if offset > 1.0]
+    assert trimmed, "the window was trimmed"
+    for offset in trimmed:
+        first = next(i for i, w in enumerate(words) if w.start >= offset - 0.05)
+        assert words[first - 1].text.endswith("."), (offset, words[first - 1].text)

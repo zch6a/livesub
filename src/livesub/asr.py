@@ -23,7 +23,11 @@ class FasterWhisper:
     CPU or a CUDA GPU. The model is downloaded once from Hugging Face the first time it is used, and
     everything after that is offline."""
 
-    def __init__(self, model: str = "small", device: str = "auto", compute_type: str = "default", beam_size: int = 5):
+    def __init__(self, model: str = "small", device: str = "auto", compute_type: str = "default", beam_size: int = 5,
+                 temperature: float | tuple[float, ...] = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)):
+        """`temperature`: a tuple lets Whisper decode again, more randomly, when a result looks wrong
+        (repetitive or improbable): up to six decodes for one window. Good for files; live, pass 0.0,
+        so that a bad window costs one decode and the captions do not stall."""
         try:
             from faster_whisper import WhisperModel
         except ImportError as e:  # pragma: no cover - depends on the environment
@@ -41,6 +45,7 @@ class FasterWhisper:
             print(f"downloading Whisper '{model}' from Hugging Face (once; after this livesub runs offline)...", file=sys.stderr)
             self.model = WhisperModel(model, device=self.device, compute_type=compute_type)
         self.beam_size = beam_size
+        self.temperature = temperature
         self.language: str | None = None
 
     def transcribe(self, audio: np.ndarray, *, offset: float = 0.0, prompt: str = "", language: str | None = None) -> list[Word]:
@@ -49,16 +54,18 @@ class FasterWhisper:
             prompt = SIMPLIFIED_PROMPT + prompt
         segments, info = self.model.transcribe(
             audio, language=language, initial_prompt=prompt or None, beam_size=self.beam_size,
-            word_timestamps=True, vad_filter=False, condition_on_previous_text=False,
+            temperature=self.temperature, word_timestamps=True, vad_filter=False, condition_on_previous_text=False,
         )
         self.language = info.language
         words: list[Word] = []
         for s in segments:
             # Whisper's best-known failure: on silence or music it invents text ("Thanks for watching!").
-            # A segment it thinks is probably not speech, and is unsure about, is dropped.
-            if s.no_speech_prob > 0.6 and s.avg_logprob < -1.0:
+            # faster-whisper already drops a window it thinks is probably not speech *and* is unsure
+            # about (no_speech_prob > 0.6 with avg_logprob < -1); this also drops a segment it is
+            # nearly sure is not speech, however confident the text (as whisper_streaming does).
+            if s.no_speech_prob > 0.9:
                 continue
-            # Its other one: looping on a word ("看,看,看,看,看" in a pause, seen in a real run).
+            # Its other one: looping ("看,看,看,看,看,看,看" in a pause, seen in a real run).
             if s.compression_ratio > 2.4:
                 continue
             words.extend(Word(offset + w.start, offset + w.end, w.word) for w in (s.words or []))
@@ -66,16 +73,31 @@ class FasterWhisper:
 
 
 def drop_loops(words: list[Word], limit: int = 4) -> list[Word]:
-    """Remove a run of `limit` or more identical words, keeping the first: people rarely say a word four
-    times in a row, while a recognizer stuck in a loop does it all the time."""
+    """Remove a recognizer loop, keeping the first occurrence: a word repeated `limit` or more times in
+    a row, or a phrase of 2 to 4 words repeated 3 or more times ("Thank you. Thank you. Thank you.").
+    A single Chinese or Japanese character may repeat up to five times, because people do say
+    对对对对 and 哈哈哈哈哈; Whisper's loops of one are longer."""
+    keys = [norm(w.text) for w in words]
     out: list[Word] = []
     i = 0
     while i < len(words):
-        j = i
-        while j + 1 < len(words) and norm(words[j + 1].text) == norm(words[i].text) and norm(words[i].text):
-            j += 1
-        out.extend(words[i:i + 1] if j - i + 1 >= limit else words[i:j + 1])
-        i = j + 1
+        best = None  # (phrase length, words covered)
+        for n in range(1, 5):
+            unit = keys[i:i + n]
+            if len(unit) < n or not all(unit):
+                continue
+            r = 1
+            while keys[i + r * n:i + (r + 1) * n] == unit:
+                r += 1
+            need = (6 if len(unit[0]) == 1 and is_wide(unit[0]) else limit) if n == 1 else 3
+            if r >= need and (best is None or r * n > best[1]):
+                best = (n, r * n)
+        if best:
+            out.extend(words[i:i + best[0]])
+            i += best[1]
+        else:
+            out.append(words[i])
+            i += 1
     return out
 
 

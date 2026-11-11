@@ -91,7 +91,7 @@ class FakeModel:
 
 def whisper(segments, language="en"):
     w = asr.FasterWhisper.__new__(asr.FasterWhisper)  # skip loading a real model
-    w.model, w.beam_size, w.language, w.device = FakeModel(segments, language), 5, None, "cpu"
+    w.model, w.beam_size, w.language, w.device, w.temperature = FakeModel(segments, language), 5, None, "cpu", 0.0
     return w
 
 
@@ -100,7 +100,7 @@ def test_transcribe_puts_words_on_the_stream_clock_and_drops_hallucinations():
 
     w = whisper([
         FakeSegment([(0.0, 0.3, " Hello"), (0.3, 0.6, " there.")]),
-        FakeSegment([(1.0, 1.5, " Thanks for watching!")], no_speech=0.9, logprob=-1.4),  # invented in silence
+        FakeSegment([(1.0, 1.5, " Thanks for watching!")], no_speech=0.95, logprob=-0.3),  # invented in silence, confidently
         FakeSegment([(2.0, 2.1, " the")] * 3, compression=3.1),  # looping
     ])
     words = w.transcribe(np.zeros(16000, np.float32), offset=10.0)
@@ -129,3 +129,41 @@ def test_a_loop_that_compresses_normally_is_still_cut():
     loop = [(2.0 + i * 0.2, 2.2 + i * 0.2, "看,") for i in range(6)]
     w = whisper([FakeSegment([(0.0, 0.5, "规则")] + loop + [(3.5, 3.9, "谢谢")], compression=1.6)], language="zh")
     assert join(w.transcribe(np.zeros(16000, np.float32), language="zh")) == "规则看,谢谢"
+
+
+def test_phrase_loops_are_cut_and_real_chinese_repetition_is_kept():
+    from livesub.streaming import Word, join
+
+    def ws(texts):
+        return [Word(i * 0.2, i * 0.2 + 0.2, t) for i, t in enumerate(texts)]
+
+    looped = ws([" Thank", " you.", " Thank", " you.", " Thank", " you.", " Bye."])
+    assert join(asr.drop_loops(looped)) == "Thank you. Bye."
+    twice = ws([" Thank", " you.", " Thank", " you."])
+    assert asr.drop_loops(twice) == twice  # twice is still speech
+    for said in ("对对对对", "哈哈哈哈哈"):
+        words = ws(list(said))
+        assert asr.drop_loops(words) == words, said
+    assert join(asr.drop_loops(ws(list("好好好好好好好")))) == "好"
+
+
+def test_live_decodes_once_and_files_may_retry():
+    from livesub import cli
+
+    seen = {}
+
+    class Recorder:
+        def __init__(self, *a, temperature=None, **k):
+            seen["temperature"] = temperature
+
+    import livesub.asr as mod
+
+    original = mod.FasterWhisper
+    mod.FasterWhisper = Recorder
+    try:
+        for command, expected in (("live", 0.0), ("file", (0.0, 0.2, 0.4, 0.6, 0.8, 1.0))):
+            args = cli.build_parser().parse_args([command] + (["x.wav"] if command == "file" else []) + ["--device", "cpu"])
+            cli.make_transcriber(args)
+            assert seen["temperature"] == expected, command
+    finally:
+        mod.FasterWhisper = original

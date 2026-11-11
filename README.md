@@ -23,7 +23,8 @@ translation underneath.
   on the CPU or a CUDA GPU. Translation goes to an OpenAI-compatible endpoint *you* choose. Point it at
   a local model (Ollama, LM Studio, llama.cpp) and nothing leaves your computer.
 - **Captions that don't flicker.** A word is shown dimmed while it is being recognized. It turns white
-  only once two readings in a row agree on it, and from then on it never changes.
+  once two readings in a row agree on it, and from then on it never changes. (At the end of speech
+  the last reading is taken as it is, since no second one will come.)
 - **System-wide.** It captures what your speakers play (WASAPI loopback on Windows, monitor sources on
   Linux) or a microphone.
 - **Subtitle files too.** `livesub file` writes SRT or WebVTT for a recording (WAV, MP3, M4A, MP4, MKV, …):
@@ -31,7 +32,7 @@ translation underneath.
 
 > **Status: 0.1, in development.** Recognition has been checked end to end with real Whisper on English
 > and Chinese speech from text-to-speech, including fast, noisy, music-backed and mixed-language
-> speech. The rest of the pipeline, live mode included, is covered by 99 tests on synthetic audio. Live
+> speech. The rest of the pipeline, live mode included, is covered by 111 tests on synthetic audio. Live
 > capture from a real sound card has not been tested by the author yet, and translation only against a
 > stand-in endpoint, not a real model. See [POLISH_LOG.md](POLISH_LOG.md).
 
@@ -109,25 +110,35 @@ audio ─▶ resample to 16 kHz ─▶ voice activity ─▶ speech buffer ─(e
         └── translation ◀── cues ◀── line breaking (2 lines, CJK-aware)
 ```
 
-- **Voice activity.** An energy detector with an adaptive noise floor decides *when* to run Whisper.
-  Silence costs nothing, and Whisper is never asked to transcribe it, which is when it tends to invent
-  text.
+- **Voice activity.** An energy detector with an adaptive estimate of the background decides *when* to
+  run Whisper, so silence costs nothing. It is simple and needs no model, and it can be fooled: music
+  or steady noise counts as voice until, after 15 s without a pause, the background is re-estimated.
+  Whisper then hears no words, and its invented text in such stretches ("Thanks for watching!",
+  repeated phrases) is filtered out. Live readings decode once (no temperature fallback), so a bad
+  window costs one decode and cannot stall the captions.
 - **Local agreement** ([Macháček et al., 2023](https://arxiv.org/abs/2307.14743)). The recognizer re-reads
   the growing buffer, and the words that two consecutive readings agree on are committed. New words
   are lined up with the committed text by their *words*, not their timestamps: Whisper's times shift
   between readings, and in a real run, aligning by time silently dropped words. A buffer longer than
-  12 s is cut after the last committed word, so recognition time stays bounded however long someone
-  talks.
-- **Cues.** A cue closes at the end of a sentence, at a pause, or when two lines are full. In that last
-  case it ends at a comma when it can, so a short tail isn't left on its own. Lines break between Latin
-  words, and anywhere in Chinese or Japanese except before closing punctuation.
+  12 s is cut at the end of the last committed sentence (or, without one, after the last committed
+  word), so recognition time stays bounded however long someone talks.
+- **Cues**, following [Netflix's timed-text style guides](https://partnerhelp.netflixstudios.com/hc/en-us/articles/215758617-Timed-Text-Style-Guide-General-Requirements).
+  - A cue closes at the end of a sentence, at a pause, or when its two lines are full. In that last
+    case it ends at a comma when it can, so a short tail isn't left on its own.
+  - Lines hold 42 characters, or 16 in Chinese and Japanese. Two lines are broken where they read
+    best: after punctuation, and about equally long, rather than by filling the first line.
+  - Latin words are never split. Closing punctuation never starts a line, and an opening bracket
+    never ends one.
+  - In subtitle files, a cue stays up long enough to read (20 characters a second, 9 in Chinese),
+    between 5/6 s and 7 s, with two frames between cues.
+  - Bilingual files give each language up to two lines of its own, so a cue can have four.
 
 ## Develop
 
 ```bash
 uv venv && uv pip install numpy pytest
 uv run pytest
-python scripts/mutate.py      # test the tests: 46 planted bugs, each must make a test fail
+python scripts/mutate.py      # test the tests: 57 planted bugs, each must make a test fail
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how the tests work and how to check against real Whisper

@@ -54,6 +54,10 @@ class Agreement:
         for k in range(min(len(tail), len(new)), 0, -1):
             hits = [i for i in range(len(new) - k + 1) if texts[i:i + k] == tail[-k:]]
             hits = [i for i in hits if abs(new[i + k - 1].end - self.last_end) < 2.0]
+            if k == 1:
+                # One word is weak evidence: "the" or "的" further on would match the tail and drop the
+                # words before it. Accept it only at the head of the guess, as whisper_streaming does.
+                hits = [i for i in hits if i <= 1]
             if hits:
                 start = min(hits, key=lambda i: abs(new[i + k - 1].end - self.last_end)) + k
                 break
@@ -73,6 +77,21 @@ class Agreement:
         self.buffer, self.new = self.new, []
         self._commit(out)
         return out
+
+    def sentence_cut(self, after: float) -> float | None:
+        """The end of the last committed sentence that ends after `after`, if any: the place to cut the
+        audio window so that the next reading starts at the beginning of a sentence (as in the paper's
+        "sentence trimming"), with the context Whisper reads best."""
+        from .captions import SENTENCE_END
+
+        for i in range(len(self.committed) - 1, -1, -1):
+            w = self.committed[i]
+            if w.end <= after:
+                return None
+            if w.text.rstrip().endswith(SENTENCE_END):
+                nxt = self.committed[i + 1].start if i + 1 < len(self.committed) else (self.buffer[0].start if self.buffer else w.end)
+                return min(w.end, nxt)
+        return None
 
     def cut_point(self) -> float:
         """Where the audio before can be dropped: after the last committed word, but not past the first

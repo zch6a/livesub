@@ -32,7 +32,9 @@ def make_transcriber(args):
         # 8 s window, "base" 0.6 s. A file is read once per stretch of speech, so "small" is fast enough.
         model = "small" if device == "cuda" or args.command == "file" else "base"
     print(f"loading Whisper '{model}' on the {device.upper()} (downloaded once, on first use)...", file=sys.stderr)
-    return FasterWhisper(model, device=device, compute_type=args.compute_type, beam_size=args.beam)
+    # Live, no temperature fallback: one decode per reading, so a bad window cannot stall the captions.
+    temperature = 0.0 if args.command == "live" else (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+    return FasterWhisper(model, device=device, compute_type=args.compute_type, beam_size=args.beam, temperature=temperature)
 
 
 def make_translator(args):

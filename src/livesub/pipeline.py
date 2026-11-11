@@ -124,7 +124,8 @@ class LiveCaptioner:
         self._partial()
 
     def _trim(self) -> None:
-        cut = self.agreement.cut_point()
+        # Prefer to cut at the end of a committed sentence, so the next window starts at one.
+        cut = self.agreement.sentence_cut(after=self._buf_start + 1.0) or self.agreement.cut_point()
         if cut <= self._buf_start + 1.0:
             # Nothing settled in the whole window (or barely): settle the current guess rather than
             # let the window grow without bound.
@@ -191,10 +192,15 @@ class TranslationWorker:
             self.on_done(done)
 
 
-def speech_regions(audio: np.ndarray, *, vad: EnergyVAD | None = None, pad: float = 0.3, join_gap: float = 1.0,
-                   max_len: float = 30.0) -> list[tuple[float, float]]:
+def speech_regions(audio: np.ndarray, *, vad: EnergyVAD | None = None, pad_before: float = 1.0, pad_after: float = 0.5,
+                   join_gap: float = 1.0, max_len: float = 120.0) -> list[tuple[float, float]]:
     """Where the speech is in a recording, as (start, end) seconds: the VAD's speech, padded, with short
-    gaps joined, and split to at most `max_len` (Whisper reads 30 s at a time)."""
+    gaps joined, but no longer than `max_len`. A long region is not cut every 30 s here: faster-whisper
+    moves its 30 s window along by the timestamps it finds, without cutting a word in two, and a cut
+    made here could. Only a region over `max_len` is split, at its quietest moment near the end.
+
+    A full second before each region: given only 0.3 s of lead-in, Whisper wrote fast speech with no
+    punctuation at all (every word right, not one full stop), and with 1 s it punctuated normally."""
     vad = vad or EnergyVAD()
     states = vad.process(audio)
     frame = vad.frame / RATE
@@ -209,19 +215,34 @@ def speech_regions(audio: np.ndarray, *, vad: EnergyVAD | None = None, pad: floa
             on = None
     end = len(audio) / RATE
     merged: list[list[float]] = []
-    for a, b in raw:
-        a, b = max(0.0, a - pad), min(end, b + pad)
+    for a, b in raw:  # join speech separated by less than join_gap of silence (before any padding)
         if merged and a - merged[-1][1] < join_gap and b - merged[-1][0] <= max_len:
             merged[-1][1] = b
         else:
             merged.append([a, b])
+    for i, r in enumerate(merged):  # then pad, but never into the previous region: words would be read twice
+        r[0] = max(0.0, r[0] - pad_before, merged[i - 1][1] if i else 0.0)
+        r[1] = min(end, r[1] + pad_after, merged[i + 1][0] if i + 1 < len(merged) else end)
     out: list[tuple[float, float]] = []
+    levels = _frame_levels(audio, vad.frame)
     for a, b in merged:
         while b - a > max_len:
-            out.append((a, a + max_len))
-            a += max_len
+            cut = _quietest(levels, frame, a + 0.8 * max_len, a + max_len)
+            out.append((a, cut))
+            a = cut
         out.append((a, b))
     return out
+
+
+def _frame_levels(audio: np.ndarray, size: int) -> np.ndarray:
+    n = len(audio) // size
+    x = audio[: n * size].astype(np.float64).reshape(n, size)
+    return np.sqrt(np.mean(x**2, axis=1))
+
+
+def _quietest(levels: np.ndarray, frame: float, lo: float, hi: float) -> float:
+    i, j = int(lo / frame), max(int(lo / frame) + 1, int(hi / frame))
+    return (i + int(np.argmin(levels[i:j]))) * frame
 
 
 def transcribe_file(transcriber: Transcriber, audio: np.ndarray, *, language: str | None = None,

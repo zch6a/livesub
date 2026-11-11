@@ -112,3 +112,27 @@ def test_a_new_sentence_may_begin_with_the_last_word_of_the_previous_one():
         a.flush()
     a.finish()
     assert join(a.committed) == "Thank you. You know, this"
+
+
+def test_a_common_word_further_on_does_not_count_as_the_committed_tail():
+    # Committed "... sat on the"; the next guess returns only the continuation, with "the" further on.
+    a = Agreement()
+    first = words((0.0, " the"), (0.3, " cat"), (0.6, " sat"), (0.9, " on"), (1.2, " the"))
+    for _ in range(2):
+        a.insert(first, window_start=0.0)
+        a.flush()
+    cont = words((1.5, " mat"), (1.8, " and"), (2.1, " the"), (2.4, " dog"))
+    for _ in range(2):
+        a.insert(cont, window_start=0.0)
+        a.flush()
+    assert join(a.committed) == "the cat sat on the mat and the dog"
+
+
+def test_the_window_is_cut_at_a_sentence_end_when_there_is_one():
+    a = Agreement()
+    ws = words((0.0, " It"), (0.3, " rained."), (0.8, " Then"), (1.1, " it"), (1.4, " stopped"))
+    for _ in range(2):
+        a.insert(ws, window_start=0.0)
+        a.flush()
+    assert a.sentence_cut(after=0.0) == 0.6  # after "rained.", not after "stopped"
+    assert a.sentence_cut(after=0.7) is None
