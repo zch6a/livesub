@@ -81,3 +81,29 @@ def test_downsampling_removes_tones_above_the_new_nyquist_instead_of_aliasing_th
 def test_to_mono():
     assert to_mono(np.array([[1.0, 0.0], [0.5, 0.5]])).tolist() == [0.5, 0.5]
     assert to_mono([0.1, 0.2]).dtype == np.float32
+
+
+def test_other_formats_are_decoded_when_pyav_is_installed(tmp_path):
+    av = pytest.importorskip("av")
+    from livesub.audio import read_audio
+
+    x = tone(440, 44100, 1.0)
+    path = tmp_path / "a.m4a"
+    with av.open(str(path), "w") as out:
+        st = out.add_stream("aac", rate=44100)
+        st.layout = "mono"
+        for i in range(0, len(x), 1024):
+            frame = av.AudioFrame.from_ndarray(x[i:i + 1024].reshape(1, -1), format="flt", layout="mono")
+            frame.sample_rate = 44100
+            for p in st.encode(frame):
+                out.mux(p)
+        for p in st.encode(None):
+            out.mux(p)
+    y, rate = read_audio(path)
+    assert rate == RATE and abs(len(y) / RATE - 1.0) < 0.1
+    assert abs(peak_hz(y[1000:-1000], RATE) - 440) < 5
+    with pytest.raises(ValueError, match="cannot read audio"):
+        (tmp_path / "junk.mp3").write_bytes(b"\x00" * 64)
+        read_audio(tmp_path / "junk.mp3")
+    with pytest.raises(FileNotFoundError):
+        read_audio(tmp_path / "missing.mp3")

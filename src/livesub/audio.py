@@ -26,7 +26,8 @@ def read_wav(path: str | Path) -> tuple[np.ndarray, int]:
             channels, width, rate, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
             raw = w.readframes(n)
     except (wave.Error, EOFError) as e:  # a file shorter than a WAV header raises EOFError
-        raise ValueError(f"{path}: not a PCM WAV file ({e}); convert it first, e.g. ffmpeg -i in.mp4 -ar 16000 -ac 1 out.wav") from e
+        raise ValueError(f"{path}: not a PCM WAV file ({e}); install faster-whisper (pip install 'livesub[whisper]') to read "
+                         "other formats, or convert it: ffmpeg -i in.mp4 -ar 16000 -ac 1 out.wav") from e
     if width == 1:
         x = (np.frombuffer(raw, np.uint8).astype(np.float32) - 128) / 128
     elif width == 2:
@@ -102,3 +103,28 @@ class Resampler:
 
 def resample(x: np.ndarray, src: int, dst: int = RATE) -> np.ndarray:
     return Resampler(src, dst)(x)
+
+
+def read_audio(path: str | Path) -> tuple[np.ndarray, int]:
+    """Any recording as mono float32: WAV directly, and anything else (MP3, M4A, MP4, MKV, ...) through
+    PyAV, which faster-whisper installs."""
+    try:
+        return read_wav(path)
+    except ValueError as wav_error:
+        try:
+            import av
+        except ImportError:
+            raise wav_error from None
+        if not Path(path).is_file():
+            raise FileNotFoundError(path) from None
+        try:
+            with av.open(str(path)) as container:
+                stream = next((s for s in container.streams if s.type == "audio"), None)
+                if stream is None:
+                    raise ValueError(f"{path}: has no audio track")
+                resampler = av.AudioResampler(format="flt", layout="mono", rate=RATE)
+                chunks = [f.to_ndarray().reshape(-1) for frame in container.decode(stream) for f in resampler.resample(frame)]
+                chunks += [f.to_ndarray().reshape(-1) for f in resampler.resample(None)]
+        except av.error.FFmpegError as e:
+            raise ValueError(f"{path}: cannot read audio from it; is it an audio or video file? ({e})") from e
+        return (np.concatenate(chunks).astype(np.float32) if chunks else np.zeros(0, np.float32)), RATE

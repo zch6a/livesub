@@ -47,7 +47,12 @@ def test_bad_input_is_a_clear_error(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "make_transcriber", lambda args: ScriptedTranscriber([]))
     (tmp_path / "x.wav").write_bytes(b"nope")
     assert cli.main(["file", str(tmp_path / "x.wav")]) == 1
-    assert "ffmpeg" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    try:
+        import av  # noqa: F401 - with a decoder installed, the decoder's own message
+        assert "cannot read audio" in err
+    except ImportError:
+        assert "ffmpeg" in err
 
 
 def test_help_and_version(capsys):

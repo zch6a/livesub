@@ -16,7 +16,7 @@ import threading
 from pathlib import Path
 
 from . import __version__
-from .audio import RATE, read_wav, resample
+from .audio import RATE, read_audio, resample
 from .captions import Cue, to_srt, to_vtt
 from .pipeline import LiveCaptioner, TranslationWorker, run_file, transcribe_file
 from .translate import ChatTranslator, TranslationError
@@ -69,7 +69,15 @@ def _common(p: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="livesub", description="Offline live captions, with optional translation.")
+    p = argparse.ArgumentParser(
+        prog="livesub", description="Offline live captions, with optional translation.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="examples:\n"
+               "  livesub live                          captions for what this computer plays\n"
+               "  livesub live --source mic --console   a microphone, in the terminal\n"
+               "  livesub file lecture.mp4              write lecture.srt\n"
+               "  livesub live --translate-to zh --llm-url http://localhost:11434/v1 --llm-model qwen2.5:7b\n"
+               "\nrun `livesub live --help` or `livesub file --help` for all options")
     p.add_argument("--version", action="version", version=f"livesub {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 
@@ -81,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     live.add_argument("--font-size", type=int, default=22)
     _common(live)
 
-    f = sub.add_parser("file", help="subtitle a WAV recording")
+    f = sub.add_parser("file", help="subtitle a recording (WAV, or any audio/video format once faster-whisper is installed)")
     f.add_argument("input", type=Path)
     f.add_argument("-o", "--output", type=Path, help="output .srt or .vtt (default: next to the input, .srt)")
     f.add_argument("--subs", choices=["original", "translation", "both"], default=None,
@@ -115,7 +123,7 @@ def translate_all(translator, cues: list[Cue], target: str) -> list[Cue]:
 
 
 def cmd_file(args) -> int:
-    audio, rate = read_wav(args.input)
+    audio, rate = read_audio(args.input)
     audio = resample(audio, rate, RATE)
     translator = make_translator(args)
     transcriber = make_transcriber(args)
