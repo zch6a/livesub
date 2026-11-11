@@ -95,3 +95,32 @@ A new user's first run: a fresh clone into an empty folder, a new virtual enviro
 - **Known limitation**: on fast speech, Whisper `small` sometimes writes no punctuation at all. Every word is right, but cues then break only when they are full, sometimes mid-phrase. This comes from the model, not from livesub; it is not worked around.
 - **Not testable here**: translation with a real model (no Ollama, LM Studio or llama.cpp server on this machine; only the fake endpoint in the tests), live capture, and the GPU. The README now says all three.
 - 101 tests, ruff clean.
+
+## Round 3
+
+Checked against the literature and comparable projects: an agent read the Macháček et al. paper and the whisper_streaming code, WhisperLive and whisper.cpp's stream example, faster-whisper's defaults, and Netflix's timed-text guides (English and Simplified Chinese). It found 12 issues, and all were acted on.
+
+**Wrong or misleading**
+- **Chinese lines held 21 characters**, while the module's own docstring said 16. The width was 42 columns for every script. Lines are now 16 characters in Chinese and Japanese (32 columns) and 42 in other scripts, chosen by the text itself.
+- **Temperature fallback could stall live captions.** faster-whisper re-decodes a window up to 6 times when the result looks bad, and the README said a reading's time is the lag. Live readings now decode once (`temperature=0.0`); files keep the fallback. Measured on the live loop with `base`: Chinese went from 2.25× to 1.49× real time, and its error rate fell from 10.3% to 6.9% CER.
+- **"Whisper is never asked to transcribe silence" was overstated.** Music and steady noise count as voice until the 15 s re-estimate. Both READMEs now say so. (Using faster-whisper's bundled Silero VAD as the gate is left as a possible improvement.)
+- **My `no_speech_prob > 0.6 and avg_logprob < -1` filter did nothing**: faster-whisper already applies exactly that rule. It is replaced by one that adds something: drop a segment Whisper is over 90% sure is not speech (as whisper_streaming does).
+- **Long file regions were cut every 30 s**, which can split a word. faster-whisper moves its own 30 s window along by timestamps, so regions now go to it whole. Only a region longer than 2 minutes is split, at its quietest frame; a test checks no word is cut.
+- **"Turns white only once two readings agree" has exceptions**: end of speech, and a forced trim. The README now says so.
+
+**Could be better, now done**
+- **A single-word match away from the head of a guess dropped words.** Committed "… sat on the", then a guess holding only the continuation ("mat and the dog"): the later "the" matched the tail, and "mat and" was lost. A one-word match now counts only at the head, as in whisper_streaming; longer matches may be anywhere near. The old code fails the new test.
+- **Sentence trimming.** A full buffer is now cut at the end of the last committed sentence, so the next window starts with a sentence, falling back to the last committed word. A test runs a 40 s talk with an 8 s window and checks that every trimmed window starts at a sentence.
+- **Loops of phrases**: "Thank you. Thank you. Thank you." is now caught, at three or more repeats of a 2–4 word phrase. A single Chinese character may repeat up to five times (对对对对, 哈哈哈哈哈), while Whisper's own loops are longer.
+- **Line breaking**: two lines are now broken where they read best (after punctuation; about equal, the top a little shorter), not filled greedily. Closing quotes ” ’ joined the "never starts a line" set, and opening brackets and quotes never end a line.
+- **Display timing in files**:
+  - long enough to read: 20 characters a second, 9 in Chinese;
+  - between 5/6 s and 7 s on screen;
+  - two frames before the next cue, with gaps under half a second closed.
+- **Bilingual files** can have four lines (two per language); the docstring and the README now say so.
+
+**Also this round**
+- **Missing punctuation on fast speech** (round 2's known limitation) came from livesub, not the model. With 0.3 s of lead-in before a region, Whisper wrote the fast clip with no punctuation at all; with 1 s it punctuated normally. Regions now get 1 s before and 0.5 s after. They are joined before padding, so the padding never takes in a neighbouring region's audio.
+- **Re-scored with real Whisper.** Live with `base`: music 3.2%, Chinese 6.9%, the rest unchanged. Files with `small`: clean English and music now 0%, Chinese 1.1%. The README tables are updated.
+- Every change has a test. Several fail on the old code: the single-word match, the opening bracket on a three-line cue, and sentence trimming (checked with mutants).
+- 111 tests, 57 of 57 mutants caught, ruff clean.

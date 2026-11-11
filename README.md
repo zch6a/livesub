@@ -82,9 +82,9 @@ for Chinese). That is easier than real speech, so treat these numbers as a floor
 
 | | clean | fast | 60 s talk | noise at 10 dB SNR | music bed | Chinese | Chinese + English |
 |---|---|---|---|---|---|---|---|
-| `base`, live | 2.1% | 0% | 1.9% | 5.3% | 4.3% | 10.3% | 13.3% |
+| `base`, live | 2.1% | 0% | 1.9% | 5.3% | 3.2% | 6.9% | 13.3% |
 | `base`, live, `--beam 1` | 3.2% | 0% | 3.8% | 5.3% | 3.2% | 13.8% | 30% |
-| `small`, `livesub file` | 1.1% | 0% | 1.3% | 2.1% | 1.1% | 1.1% | 10% |
+| `small`, `livesub file` | 0% | 0% | 1.3% | 2.1% | 0% | 1.1% | 10% |
 
 - **Files.** `livesub file` reads each stretch of speech once. With `small` on a CPU, a recording takes
   about a fifth of its length. `--live-loop` runs it through the live loop instead, as `livesub live`
