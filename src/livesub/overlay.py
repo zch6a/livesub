@@ -14,6 +14,17 @@ import threading
 
 
 class Overlay:
+    @staticmethod
+    def check() -> None:
+        """Can a window open here? Asked before the model loads, so that a missing display fails at once."""
+        try:
+            import tkinter as tk
+
+            tk.Tk().destroy()
+        except Exception as e:  # noqa: BLE001 - ImportError (no python3-tk) or TclError (no display)
+            raise RuntimeError(f"the caption overlay cannot open ({e}); use --console, or install tkinter "
+                               "(python3-tk on Debian and Ubuntu)") from e
+
     def __init__(self, font_size: int = 22, width_ratio: float = 0.7, opacity: float = 0.82, lines: int = 2):
         try:
             import tkinter as tk  # imported here: the rest of livesub works without a display

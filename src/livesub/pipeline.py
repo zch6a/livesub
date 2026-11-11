@@ -163,10 +163,17 @@ class TranslationWorker:
     `on_done` receives each cue again with its translation (or unchanged, if translation failed)."""
 
     def __init__(self, translator, target: str, on_done: Callable[[Cue], None], context: int = 2,
-                 on_error: Callable[[Exception], None] | None = None):
+                 on_error: Callable[[Exception], None] | None = None, max_backlog: int = 3):
+        """`max_backlog`: lines waiting beyond this are passed on untranslated, oldest first. A slow
+        translator then falls behind by a few lines at most, instead of by more every minute, and
+        stopping does not wait for a long queue. `on_error` hears only the first failure; `failed`
+        and `skipped` count them all."""
         self.translator, self.target, self.on_done, self.on_error = translator, target, on_done, on_error
         self.context: list[str] = []
         self.keep = context
+        self.max_backlog = max_backlog
+        self.failed = 0
+        self.skipped = 0
         self.q: queue.Queue[Cue | None] = queue.Queue()
         self.thread = threading.Thread(target=self._loop, daemon=True, name="livesub-translate")
         self.thread.start()
@@ -180,24 +187,30 @@ class TranslationWorker:
 
     def _loop(self) -> None:
         while (cue := self.q.get()) is not None:
-            try:
-                text = self.translator.translate(cue.text, self.target, self.context[-self.keep:])
-                done = replace(cue, translation=text)
-            except Exception as e:  # noqa: BLE001 - a failed line must not stop the captions
+            if self.q.qsize() >= self.max_backlog:
+                self.skipped += 1  # newer lines are waiting: this one would be stale by the time it is done
                 done = cue
-                if self.on_error:
-                    self.on_error(e)
+            else:
+                try:
+                    text = self.translator.translate(cue.text, self.target, self.context[-self.keep:])
+                    done = replace(cue, translation=text)
+                except Exception as e:  # noqa: BLE001 - a failed line must not stop the captions
+                    done = cue
+                    self.failed += 1
+                    if self.on_error and self.failed == 1:
+                        self.on_error(e)
             self.context.append(cue.text)
             del self.context[:-self.keep]
             self.on_done(done)
 
 
 def speech_regions(audio: np.ndarray, *, vad: EnergyVAD | None = None, pad_before: float = 1.0, pad_after: float = 0.5,
-                   join_gap: float = 1.0, max_len: float = 120.0) -> list[tuple[float, float]]:
+                   join_gap: float = 1.0, max_len: float = 30.0) -> list[tuple[float, float]]:
     """Where the speech is in a recording, as (start, end) seconds: the VAD's speech, padded, with short
-    gaps joined, but no longer than `max_len`. A long region is not cut every 30 s here: faster-whisper
-    moves its 30 s window along by the timestamps it finds, without cutting a word in two, and a cut
-    made here could. Only a region over `max_len` is split, at its quietest moment near the end.
+    gaps joined, and at most `max_len` long, split at the quietest moment in its last fifth so that no
+    word is cut in two. At most 30 s, because Whisper applies the prompt (earlier text, and for Chinese
+    the steer towards Simplified characters) only to the first 30 s of each call: in a 78 s region,
+    Chinese turned Traditional after the first window.
 
     A full second before each region: given only 0.3 s of lead-in, Whisper wrote fast speech with no
     punctuation at all (every word right, not one full stop), and with 1 s it punctuated normally."""

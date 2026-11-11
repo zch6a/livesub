@@ -12,7 +12,7 @@ from __future__ import annotations
 import unicodedata
 from dataclasses import dataclass, replace
 
-from .streaming import Word, join
+from .streaming import Word, join, norm
 
 SENTENCE_END = tuple(".!?。！？…")
 CLAUSE_END = tuple(",;:，、；：")
@@ -144,6 +144,8 @@ class CueBuilder:
     def add(self, words: list[Word]) -> list[Cue]:
         out: list[Cue] = []
         for w in words:
+            if not self.words and not norm(w.text):
+                continue  # a lone "." or "," split off by the recognizer would be a cue of its own
             if self.words and w.start - self.words[-1].end > self.max_gap:
                 out.append(self._close())
             while self.words and (len(wrap(join(self.words + [w]), self.max_width)) > self.max_lines

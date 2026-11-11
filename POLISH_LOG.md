@@ -144,3 +144,42 @@ Performance and a full read of the code.
   - Ruff's complexity rules (C901, PLR0912, PLR0915) pass on all of `src`.
 - **Tests**: live translation end to end. A slow fake translator (0.6 s a reply) checks that the overlay shows translations, and that the saved file has every cue translated even when the last translation arrives after stopping. Without that slowness, the mutant that skips waiting for translations had survived. The token cap is checked too.
 - 112 tests, 60 of 60 mutants caught, ruff clean.
+
+## Round 5
+
+A final blind review: a fresh agent with none of the earlier rounds' conclusions read everything, ran the tests and the CLI, and made its own recordings with text-to-speech. It found 14 problems, the worst of them critical. All are fixed, each with a test; 14 of the 15 new tests fail on the code as it was before this round.
+
+- **Critical: `livesub file` crashed on any real lecture and wrote nothing.** Round 4's token cap allowed up to 440 new tokens, and every region after the first passes the earlier text as its prompt. faster-whisper refuses a prompt plus cap over 448 tokens. My tests used a fake model with no such limit, so they could not see it. Now:
+  - the cap is computed per 30 s chunk, minus the prompt's actual token count (as faster-whisper cuts it, to 223 tokens, plus 4 task tokens);
+  - the fake model enforces the 448 rule;
+  - a test runs the real faster-whisper (`tiny`, where it is installed) on 75 s of continuous speech in English and Chinese, with a long Chinese prompt;
+  - the reviewer's 68 s English lecture now gives 18 captions.
+- **Chinese turned Traditional after the first 30 s.** faster-whisper applies a prompt only to the first window of a call, and the Simplified steer was skipped whenever the prompt already held Chinese, which could itself be Traditional. Files are read in regions of at most 30 s again, split at the quietest moment in their last fifth so no word is cut, and the steer is always given for Chinese. The reviewer's 78 s Chinese lecture now has no Traditional characters, and its invented ending "字幕製作曲" is gone.
+- **Ctrl+C twice lost the whole `--save` transcript.** Only the first press was handled. The first now prints what is happening, a second skips the last reading but still saves, and `main` turns a stray interrupt into exit code 130 instead of a traceback.
+- **A slow or unreachable translator stalled shutdown**: 30 s per queued line, and the queue had no limit. Now:
+  - a line that waits behind three newer ones is passed on untranslated;
+  - live requests time out after 10 s;
+  - the shutdown wait is capped at 15 s;
+  - errors are reported once, with a count of untranslated lines at the end;
+  - the endpoint is checked with a bare TCP connection (nothing sent) before the model loads.
+- **Any failure loading a cached model started a download**, with a wrong message: a bad `--compute-type` reached the network. Only `FileNotFoundError`, which is what "not in the cache" raises, leads to a download now.
+- **`--llm-key` was ignored** with `LIVESUB_LLM_BASE_URL`. Fixed. `--llm-*` options without `--translate-to`, and `--subs translation` without a translator, are now errors instead of being silently ignored.
+- **A cue holding only "."** appeared in a real run. A punctuation-only word can no longer start a cue.
+- **`file -o` was unchecked, and the default `movie.srt` silently replaced subtitles already next to `movie.mkv`.** Output paths for `file` and `live --save` are checked before any work: suffix, folder, and an existing file, which needs `--overwrite`.
+- **Console mode died on a terminal that cannot show Chinese** (cp1252 redirect). Unprintable characters now become "?".
+- **`--step 0.1` loaded the model before failing.** `--step` is now range-checked by argparse, and the display is checked before the model loads. The overlay window opens only after the model is ready, so it is not frozen during the load.
+- **Subtitle credits Whisper learned from its training data** ("Subtitles by the Amara.org community", "字幕由…提供") are filtered out. The README and CHANGELOG no longer claim more than this.
+- **Docs**:
+  - the translation environment variables and `--overwrite` are now in the README;
+  - the test count is corrected;
+  - `uv run python scripts/mutate.py` replaces `python scripts/mutate.py`;
+  - the runner's docstring gives the current padding;
+  - the CHANGELOG is brought up to date.
+
+**Publishing.** The other five projects went to GitHub this round, which brought its own findings:
+- GitHub blocked llm-redact's push over a Stripe-shaped demo key, so the demo now uses an obviously made-up JWT, rewritten through history.
+- agent-blackbox's CI found a real quadratic regex on its first run, fixed in 1.0.1.
+
+livesub goes up the same way: noreply commit email, `main`, public.
+
+- 125 tests, ruff clean. The real-library test runs where faster-whisper and the `tiny` model are present; CI, without them, skips it.

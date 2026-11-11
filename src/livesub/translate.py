@@ -50,6 +50,21 @@ class ChatTranslator:
             return None
         return cls(url, os.environ.get("LIVESUB_LLM_MODEL", "qwen2.5:7b"), os.environ.get("LIVESUB_LLM_API_KEY"))
 
+    def check(self) -> None:
+        """Can the endpoint be reached at all? Only a TCP connection is opened: no caption, no key and
+        no request is sent. A wrong --llm-url then fails before the model loads."""
+        import socket
+
+        parts = urllib.parse.urlsplit(self.url)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise ValueError(f"{self.url}: the translation endpoint must be an http(s) URL")
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+        try:
+            socket.create_connection((parts.hostname, port), timeout=3).close()
+        except OSError as e:
+            raise RuntimeError(f"cannot reach the translation endpoint {parts.scheme}://{parts.hostname}:{port} ({e}); "
+                               "is the model server running?") from e
+
     def _opener(self) -> urllib.request.OpenerDirector:
         """A model on this machine is reached directly: an http_proxy setting would otherwise send
         every caption to the proxy first, which is exactly what running locally is meant to avoid."""

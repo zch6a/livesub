@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Protocol
 
 import numpy as np
@@ -10,9 +11,19 @@ from .captions import is_wide
 from .streaming import Word, norm
 
 SIMPLIFIED_PROMPT = "以下是普通话的句子，使用简体中文。"
+CREDITS = re.compile(r"字幕(由|製作|制作|提供|翻译|翻譯|組|组)|amara\.org|subtitles? by|请不吝点赞|請不吝點贊|订阅.{0,4}转发|訂閱.{0,4}轉發", re.I)
 
 
 class Transcriber(Protocol):
+    def _token_cap(self, seconds: float, prompt: str) -> int:
+        """How many tokens a reading may write. Speech rarely needs more than 8 a second; without a
+        cap, a window ending on a word cut in half sometimes made the decoder run on for 2.5 s
+        whatever the window's length (the worst-case lag of live captions, 3.7 s readings, down to
+        1.4 s with it). The cap applies to each 30 s chunk, and Whisper refuses a prompt plus cap over
+        448 tokens; the prompt is cut to its last 223 tokens, after 4 tokens of task and language."""
+        prompt_tokens = min(223, len(self.model.hf_tokenizer.encode(" " + prompt.strip()).ids)) if prompt else 0
+        return max(16, min(int(8 * min(seconds, 30.0)) + 16, 448 - 5 - prompt_tokens))
+
     def warm_up(self, language: str | None = None) -> None:
         """One throwaway reading, so that the first real one is not slowed by setting up."""
         self.model.transcribe(np.zeros(16000, np.float32), language=language or "en", beam_size=1, temperature=0.0)
@@ -43,7 +54,10 @@ class FasterWhisper:
             # From the local cache, without asking Hugging Face: once a model is downloaded, livesub
             # starts with no network at all. (Otherwise faster-whisper checks for updates every time.)
             self.model = WhisperModel(model, device=self.device, compute_type=compute_type, local_files_only=True)
-        except Exception:  # noqa: BLE001 - not cached yet (faster-whisper raises various errors here)
+        except FileNotFoundError:
+            # Only "not in the cache" leads to a download (huggingface_hub's LocalEntryNotFoundError is a
+            # FileNotFoundError). Any other failure, such as a compute type the device lacks, is
+            # reported as it is: it must not quietly turn into a network request.
             import sys
 
             print(f"downloading Whisper '{model}' from Hugging Face (once; after this livesub runs offline)...", file=sys.stderr)
@@ -52,21 +66,30 @@ class FasterWhisper:
         self.temperature = temperature
         self.language: str | None = None
 
+    def _token_cap(self, seconds: float, prompt: str) -> int:
+        """How many tokens a reading may write. Speech rarely needs more than 8 a second; without a
+        cap, a window ending on a word cut in half sometimes made the decoder run on for 2.5 s
+        whatever the window's length (the worst-case lag of live captions, 3.7 s readings, down to
+        1.4 s with it). The cap applies to each 30 s chunk, and Whisper refuses a prompt plus cap over
+        448 tokens; the prompt is cut to its last 223 tokens, after 4 tokens of task and language."""
+        prompt_tokens = min(223, len(self.model.hf_tokenizer.encode(" " + prompt.strip()).ids)) if prompt else 0
+        return max(16, min(int(8 * min(seconds, 30.0)) + 16, 448 - 5 - prompt_tokens))
+
     def warm_up(self, language: str | None = None) -> None:
         """One throwaway reading, so that the first real one is not slowed by setting up."""
         self.model.transcribe(np.zeros(16000, np.float32), language=language or "en", beam_size=1, temperature=0.0)
 
     def transcribe(self, audio: np.ndarray, *, offset: float = 0.0, prompt: str = "", language: str | None = None) -> list[Word]:
-        if (language or self.language) == "zh" and not any(is_wide(c) for c in prompt):
+        if (language or self.language) == "zh":
             # Whisper often writes Mandarin in Traditional characters; a Simplified prompt steers it.
-            prompt = SIMPLIFIED_PROMPT + prompt
+            # Always, even after Chinese text: an earlier Traditional reading in the prompt would
+            # otherwise carry the drift on. (Whisper applies a prompt to the first 30 s of a call only,
+            # which is why files are read in regions of at most 30 s.)
+            prompt = SIMPLIFIED_PROMPT + prompt[-150:]
         segments, info = self.model.transcribe(
             audio, language=language, initial_prompt=prompt or None, beam_size=self.beam_size,
             temperature=self.temperature, word_timestamps=True, vad_filter=False, condition_on_previous_text=False,
-            # Speech rarely needs more than 8 tokens a second. Without a cap, a window ending on a word
-            # cut in half sometimes made the decoder run on for 2.5 s whatever the window's length,
-            # which set the worst-case lag of live captions (3.7 s readings, down to 1.4 s with it).
-            max_new_tokens=min(440, int(8 * len(audio) / 16000) + 16),
+            max_new_tokens=self._token_cap(len(audio) / 16000, prompt),
         )
         self.language = info.language
         words: list[Word] = []
@@ -79,6 +102,10 @@ class FasterWhisper:
                 continue
             # Its other one: looping ("看,看,看,看,看,看,看" in a pause, seen in a real run).
             if s.compression_ratio > 2.4:
+                continue
+            # And the subtitle credits it learned from its training data, which nobody says
+            # ("字幕製作曲" at the end of a Chinese recording, "Subtitles by the Amara.org community").
+            if len(s.text) < 60 and CREDITS.search(s.text):
                 continue
             words.extend(Word(offset + w.start, offset + w.end, w.word) for w in (s.words or []))
         return drop_loops(words)

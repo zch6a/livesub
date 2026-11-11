@@ -75,17 +75,35 @@ class FakeSegment:
         from types import SimpleNamespace
 
         self.words = [SimpleNamespace(start=a, end=b, word=t) for a, b, t in words]
+        self.text = "".join(t for _, _, t in words)
         self.no_speech_prob, self.avg_logprob, self.compression_ratio = no_speech, logprob, compression
+
+
+class FakeTokenizer:
+    """Worst case for the token count: one token per character."""
+
+    def encode(self, text):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(ids=list(range(len(text))))
 
 
 class FakeModel:
     def __init__(self, segments, language="en"):
         self.segments, self.language, self.calls = segments, language, []
+        self.hf_tokenizer = FakeTokenizer()
 
     def transcribe(self, audio, **kw):
         from types import SimpleNamespace
 
         self.calls.append(kw)
+        # faster-whisper's own rule (transcribe.py): the prompt, cut to its last 223 tokens, plus the
+        # task tokens, plus max_new_tokens must not exceed 448. An earlier fake without it let a cap
+        # through that crashed every long recording.
+        prompt = kw.get("initial_prompt")
+        prompt_tokens = (min(223, len(self.hf_tokenizer.encode(" " + prompt.strip()).ids)) if prompt else 0) + 4
+        if kw.get("max_new_tokens") is not None and prompt_tokens + kw["max_new_tokens"] > 448:
+            raise ValueError(f"The length of the prompt is {prompt_tokens}, and the max_new_tokens {kw['max_new_tokens']} exceeds 448")
         return iter(self.segments), SimpleNamespace(language=self.language)
 
 
@@ -110,15 +128,20 @@ def test_transcribe_puts_words_on_the_stream_clock_and_drops_hallucinations():
     assert kw["max_new_tokens"] == 8 + 16  # one second of audio
     w.transcribe(np.zeros(16000 * 30, np.float32))
     assert w.model.calls[-1]["max_new_tokens"] == 256
+    # With a long prompt the cap shrinks so that prompt + cap fit Whisper's 448 tokens (the fake model
+    # raises otherwise), and a long recording is capped per 30 s chunk.
+    w.transcribe(np.zeros(16000 * 90, np.float32), prompt="word " * 200)
+    assert w.model.calls[-1]["max_new_tokens"] == 448 - 5 - 223
     assert w.language == "en"
 
 
-def test_chinese_gets_a_simplified_prompt_unless_the_prompt_is_already_chinese():
+def test_chinese_always_gets_the_simplified_prompt():
     w = whisper([], language="zh")
     w.transcribe(np.zeros(1600, np.float32), language="zh")
     assert w.model.calls[-1]["initial_prompt"].startswith(asr.SIMPLIFIED_PROMPT)
-    w.transcribe(np.zeros(1600, np.float32), prompt="大家好", language="zh")
-    assert w.model.calls[-1]["initial_prompt"] == "大家好"
+    # Even after Chinese text, which may itself be Traditional and would carry the drift on.
+    w.transcribe(np.zeros(1600, np.float32), prompt="大家好，這是繁體", language="zh")
+    assert w.model.calls[-1]["initial_prompt"] == asr.SIMPLIFIED_PROMPT + "大家好，這是繁體"
     w.transcribe(np.zeros(1600, np.float32), language=None)  # detected as Chinese last time
     assert w.model.calls[-1]["initial_prompt"].startswith(asr.SIMPLIFIED_PROMPT)
     e = whisper([], language="en")
@@ -170,3 +193,59 @@ def test_live_decodes_once_and_files_may_retry():
             assert seen["temperature"] == expected, command
     finally:
         mod.FasterWhisper = original
+
+
+def test_a_long_recording_with_real_faster_whisper():
+    """The real library, where it is installed with the tiny model cached (skipped elsewhere, such as
+    in CI): long speech regions, each with the earlier text as prompt, in English and Chinese. This is
+    what crashed with "prompt + max_new_tokens exceeds 448" before."""
+    pytest.importorskip("faster_whisper")
+    from livesub.pipeline import transcribe_file
+
+    try:
+        w = asr.FasterWhisper("tiny", device="cpu")
+    except Exception as e:  # noqa: BLE001 - not cached, no network
+        pytest.skip(f"tiny model not available: {e}")
+    rng = np.random.default_rng(0)
+    t = np.arange(16000 * 75) / 16000
+    # A long stretch of speech-like sound with no pause: one region of the full length before splitting.
+    audio = (0.1 * rng.standard_normal(len(t)) * (0.6 + 0.4 * np.sin(2 * np.pi * 4 * t))).astype(np.float32)
+    audio[: 16000 * 4] *= 0.01
+    audio[16000 * 4: 16000 * 6] = 0
+    for language in ("en", "zh"):
+        transcribe_file(w, audio, language=language)  # must not raise
+    long_prompt = "这是一段很长的提示文字。" * 40
+    w.transcribe(audio[: 16000 * 30], prompt=long_prompt, language="zh")
+
+
+def test_subtitle_credits_whisper_invents_are_dropped():
+    from livesub.streaming import join
+
+    w = whisper([
+        FakeSegment([(0.0, 0.5, "速度要快。")]),
+        FakeSegment([(5.0, 5.6, "字幕製作曲")]),
+        FakeSegment([(6.0, 6.8, " Subtitles by the Amara.org community")]),
+    ], language="zh")
+    assert join(w.transcribe(np.zeros(16000 * 7, np.float32), language="zh")) == "速度要快。"
+
+
+def test_only_a_missing_model_leads_to_a_download(monkeypatch, capsys):
+    import sys
+    import types
+
+    calls = []
+
+    class Model:
+        def __init__(self, name, device, compute_type, local_files_only=False):
+            calls.append(local_files_only)
+            if compute_type == "float16":
+                raise ValueError("Requested float16 compute type, but the target device does not support it")
+            if local_files_only:
+                raise FileNotFoundError("not in the cache")
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=Model))
+    with pytest.raises(ValueError, match="float16"):
+        asr.FasterWhisper("tiny", device="cpu", compute_type="float16")
+    assert calls == [True], "a bad compute type must not turn into a download"
+    asr.FasterWhisper("tiny", device="cpu")
+    assert calls[1:] == [True, False] and "downloading" in capsys.readouterr().err

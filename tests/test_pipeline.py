@@ -145,7 +145,9 @@ def test_long_speech_is_split_into_regions_whisper_can_read():
     from livesub.pipeline import speech_regions
 
     words = script(" ".join(f"w{i}" for i in range(150)), 0.5)  # 60 s without a pause
-    assert len(speech_regions(render(words, 62.0))) == 1  # faster-whisper handles 30 s windows itself
+    regions = speech_regions(render(words, 62.0))
+    assert len(regions) >= 3 and all(b - a <= 30.0 for a, b in regions)
+    # With 25 s regions, a cut at exactly 25 s would land inside a word (24.9-25.22 s): it must not.
     regions = speech_regions(render(words, 62.0), max_len=25.0)
     assert len(regions) >= 3 and all(b - a <= 25.0 for a, b in regions)
     # Split at a quiet moment: between words, not inside one.

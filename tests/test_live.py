@@ -174,3 +174,59 @@ def test_translations_reach_the_overlay_and_the_saved_file(tmp_path, monkeypatch
     srt = out.read_text(encoding="utf-8")
     assert srt.count("译文") == 2, srt  # both cues, translated, as the session ended
     assert "译文" in FakeOverlay.instances[-1].translations
+
+
+def test_a_second_ctrl_c_skips_the_last_reading_but_keeps_the_transcript(tmp_path, monkeypatch):
+    import livesub.live as live_module
+
+    real_join = threading.Thread.join
+    calls = []
+
+    def impatient_join(self, timeout=None):
+        if self.name == "livesub-capture" and not calls:
+            calls.append(1)
+            raise KeyboardInterrupt  # pressed again while livesub waits for the last reading
+        return real_join(self, timeout)
+
+    monkeypatch.setattr(live_module.threading.Thread, "join", impatient_join)
+    out = tmp_path / "kept.srt"
+    code, _ = run_live(["--save", str(out)], monkeypatch)
+    assert code == 0 and calls
+    assert "Hello there." in out.read_text(encoding="utf-8")
+
+
+def test_the_console_survives_a_terminal_that_cannot_show_the_text(monkeypatch):
+    import io
+
+    from livesub.captions import Cue
+    from livesub.live import ConsoleView
+
+    raw = io.BytesIO()
+    monkeypatch.setattr("sys.stdout", io.TextIOWrapper(raw, encoding="cp1252"))
+    view = ConsoleView()
+    view.show("大家好", "今天")
+    view.show_cue(Cue(0, 1, "大家好。"))
+    import sys
+
+    sys.stdout.flush()
+    assert b"?" in raw.getvalue()
+
+
+def test_a_translator_that_cannot_keep_up_falls_behind_by_a_few_lines_only():
+    from livesub.captions import Cue
+    from livesub.pipeline import TranslationWorker
+
+    class Slow:
+        def translate(self, text, target, context):
+            time.sleep(0.2)
+            return text.upper()
+
+    done = []
+    w = TranslationWorker(Slow(), "zh", done.append, max_backlog=2)
+    for i in range(12):
+        w.submit(Cue(i, i + 1, f"line {i}."))
+    t = time.time()
+    w.close(timeout=10)
+    assert len(done) == 12 and w.skipped > 0
+    assert time.time() - t < 2.0, "lines that queued up were passed on, not all translated in turn"
+    assert done[-1].translation == "LINE 11.", "the newest line is still translated"

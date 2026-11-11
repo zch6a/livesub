@@ -15,6 +15,12 @@ from .pipeline import LiveCaptioner, TranslationWorker
 class ConsoleView:
     """Captions in the terminal: the line being recognized is rewritten in place, finished cues scroll."""
 
+    def __init__(self):
+        # A terminal (or a redirect) that cannot show a character gets "?" instead of a crash that would
+        # end the session: with cp1252, the first Chinese caption used to stop everything.
+        with contextlib.suppress(AttributeError, ValueError):  # not a TextIOWrapper (tests, some IDEs)
+            sys.stdout.reconfigure(errors="replace")
+
     def show(self, committed: str, tentative: str) -> None:
         line = (committed + " " + tentative).strip()
         print("\r\033[K" + line[-110:], end="", flush=True)
@@ -94,6 +100,7 @@ class LiveSession:
         self.transcript = Transcript()
         self.stop = threading.Event()
         self.failure: str | None = None
+        self.untranslated = 0
         self.audio: queue.Queue = queue.Queue()
         self.worker = TranslationWorker(translator, target, self._translated,
                                         on_error=lambda e: print(f"\ntranslation failed: {e}", file=sys.stderr)) if translator else None
@@ -108,10 +115,17 @@ class LiveSession:
             self.view.run(self.stop)
         self.stop.set()
         self.audio.put(None)
-        for t in threads:
-            t.join(60)  # the last reading may take a few seconds on a CPU
+        hurry = False
+        print("\nstopping: finishing the last sentence (Ctrl+C again to skip it)", file=sys.stderr)
+        try:
+            for t in threads:
+                t.join(60)  # the last reading may take a few seconds on a CPU
+        except KeyboardInterrupt:
+            hurry = True  # a second Ctrl+C: skip the last reading, but still save what there is
         if self.worker:
-            self.worker.close()  # every cue is queued by now: wait for their translations
+            # Every cue is queued by now: wait for their translations, but not for ever.
+            self.worker.close(timeout=0.1 if hurry else 15)
+            self.untranslated = self.worker.failed + self.worker.skipped + self.worker.q.qsize()
 
     def _cue(self, cue: Cue) -> None:
         self.transcript.add(cue)

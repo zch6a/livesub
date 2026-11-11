@@ -9,9 +9,9 @@ useful thing you can send.
 ```bash
 git clone https://github.com/zch6a/livesub && cd livesub
 uv venv && uv pip install -e ".[all]" pytest ruff
-uv run pytest            # about 100 tests, no model and no audio device needed
+uv run pytest            # about 120 tests, no model and no audio device needed
 uv run ruff check src tests scripts
-python scripts/mutate.py # plants each bug in its list in turn; every one must make a test fail
+uv run python scripts/mutate.py  # plants each bug in its list in turn; every one must make a test fail
 ```
 
 ## How the tests work

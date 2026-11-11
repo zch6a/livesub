@@ -32,7 +32,7 @@ translation underneath.
 
 > **Status: 0.1, in development.** Recognition has been checked end to end with real Whisper on English
 > and Chinese speech from text-to-speech, including fast, noisy, music-backed and mixed-language
-> speech. The rest of the pipeline, live mode included, is covered by 112 tests on synthetic audio. Live
+> speech. The rest of the pipeline, live mode included, is covered by 125 tests on synthetic audio. Live
 > capture from a real sound card has not been tested by the author yet, and translation only against a
 > stand-in endpoint, not a real model. See [POLISH_LOG.md](POLISH_LOG.md).
 
@@ -62,7 +62,15 @@ livesub file lecture.mp4                      # subtitle a recording: writes lec
 livesub devices
 ```
 
-Drag the caption bar anywhere. Double-click it or press Esc to stop.
+Drag the caption bar anywhere. Double-click it or press Esc to stop; in the terminal, Ctrl+C (twice
+to skip the last sentence). `livesub file` will not replace an existing subtitle file, such as one
+already next to the video, unless you pass `--overwrite`.
+
+**Translation settings** can also come from the environment, which keeps an API key out of your shell
+history: `LIVESUB_LLM_BASE_URL` (the endpoint, e.g. `http://localhost:11434/v1`), `LIVESUB_LLM_MODEL`
+(default `qwen2.5:7b`) and `LIVESUB_LLM_API_KEY`. livesub checks that the endpoint accepts a connection
+before it starts, sending nothing. Live, a line that waits behind newer ones is left untranslated, so
+a slow model falls behind by a few lines at most.
 
 ### Which model
 
@@ -114,9 +122,10 @@ audio ─▶ resample to 16 kHz ─▶ voice activity ─▶ speech buffer ─(e
 - **Voice activity.** An energy detector with an adaptive estimate of the background decides *when* to
   run Whisper, so silence costs nothing. It is simple and needs no model, and it can be fooled: music
   or steady noise counts as voice until, after 15 s without a pause, the background is re-estimated.
-  Whisper then hears no words, and its invented text in such stretches ("Thanks for watching!",
-  repeated phrases) is filtered out. Live readings decode once (no temperature fallback), so a bad
-  window costs one decode and cannot stall the captions.
+  Whisper then hears no words. Its best-known inventions in such stretches are filtered out: text it
+  is nearly sure is not speech, loops of a word or phrase, and subtitle credits from its training data
+  ("Subtitles by the Amara.org community", "字幕由…提供"). Others can get through. Live readings decode
+  once (no temperature fallback), so a bad window costs one decode and cannot stall the captions.
 - **Local agreement** ([Macháček et al., 2023](https://arxiv.org/abs/2307.14743)). The recognizer re-reads
   the growing buffer, and the words that two consecutive readings agree on are committed. New words
   are lined up with the committed text by their *words*, not their timestamps: Whisper's times shift
@@ -139,7 +148,7 @@ audio ─▶ resample to 16 kHz ─▶ voice activity ─▶ speech buffer ─(e
 ```bash
 uv venv && uv pip install numpy pytest
 uv run pytest
-python scripts/mutate.py      # test the tests: 60 planted bugs, each must make a test fail
+python scripts/mutate.py      # test the tests: 71 planted bugs, each must make a test fail
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how the tests work and how to check against real Whisper

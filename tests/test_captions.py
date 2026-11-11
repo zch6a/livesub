@@ -147,3 +147,10 @@ def test_an_opening_bracket_moves_down_in_text_of_three_lines_too():
     lines = wrap(text)
     assert len(lines) >= 3 and "".join(lines) == text
     assert lines[0][-1] != "（" and lines[1][0] == "（"
+
+
+def test_a_lone_punctuation_mark_never_becomes_a_cue():
+    # Seen in a real run: a reading split "." off the word before it, and it became a cue of its own.
+    b = CueBuilder()
+    cues = b.add([Word(0.0, 0.3, " Write."), Word(0.35, 0.4, "."), Word(1.0, 1.3, " Next"), Word(1.3, 1.6, " one.")])
+    assert [c.text for c in cues] == ["Write.", "Next one."]

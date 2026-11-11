@@ -6,7 +6,7 @@ The unmutated suite must pass first; otherwise every mutant would look "caught".
 never modified: the code is copied to a temporary folder.
 
 Left out as equivalent: starting a speech region where the VAD noticed speech rather than a few frames
-earlier (the 0.3 s padding covers the difference).
+earlier (the 1 s padding covers the difference).
 """
 
 from __future__ import annotations
@@ -67,10 +67,10 @@ MUTANTS = [
     ("src/livesub/asr.py", "return drop_loops(words)", "return words"),
     ("src/livesub/asr.py", "prompt = SIMPLIFIED_PROMPT + prompt", "prompt = prompt"),
     # live command
-    ("src/livesub/cli.py", "check_save_path(args.save)", "pass"),
+    ("src/livesub/cli.py", "    check_output(args.save, \"--save\", args.overwrite)", "    pass"),
     ("src/livesub/live.py", "self.captioner.feed(block, recognize=self.audio.empty())", "self.captioner.feed(block)"),
     ("src/livesub/live.py", "self.transcript.translated(cue)", "pass"),
-    ("src/livesub/live.py", "self.worker.close()  # every cue is queued by now: wait for their translations", "pass"),
+    ("src/livesub/live.py", "            self.worker.close(timeout=0.1 if hurry else 15)", "            pass"),
     ("src/livesub/cli.py", "args.llm_key or os.environ.get(\"LIVESUB_LLM_API_KEY\")", "args.llm_key"),
     # round 3: subtitle rules, recognizer settings, trimming
     ("src/livesub/captions.py", "return CJK_WIDTH if is_cjk_text(text) else LATIN_WIDTH", "return LATIN_WIDTH"),
@@ -83,8 +83,19 @@ MUTANTS = [
     ("src/livesub/pipeline.py", "cut = _quietest(levels, frame, a + 0.8 * max_len, a + max_len)", "cut = a + max_len"),
     ("src/livesub/cli.py", "temperature = 0.0 if args.command == \"live\" else (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)", "temperature = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)"),
     ("src/livesub/asr.py", "if s.no_speech_prob > 0.9:", "if False:"),
-    ("src/livesub/asr.py", "max_new_tokens=min(440, int(8 * len(audio) / 16000) + 16),", "max_new_tokens=448,"),
     ("src/livesub/asr.py", "need = (6 if len(unit[0]) == 1 and is_wide(unit[0]) else limit) if n == 1 else 3", "need = limit if n == 1 else 99"),
+    # round 5: limits of the real library, shutdown, output checks
+    ("src/livesub/asr.py", "return max(16, min(int(8 * min(seconds, 30.0)) + 16, 448 - 5 - prompt_tokens))", "return max(16, min(int(8 * seconds) + 16, 440))"),
+    ("src/livesub/asr.py", "prompt = SIMPLIFIED_PROMPT + prompt[-150:]", "prompt = prompt if any(is_wide(c) for c in prompt) else SIMPLIFIED_PROMPT + prompt"),
+    ("src/livesub/asr.py", "if len(s.text) < 60 and CREDITS.search(s.text):", "if False:"),
+    ("src/livesub/asr.py", "        except FileNotFoundError:", "        except Exception:"),
+    ("src/livesub/captions.py", "            if not self.words and not norm(w.text):\n                continue", "            pass"),
+    ("src/livesub/cli.py", "    if path.exists() and not overwrite:", "    if False:"),
+    ("src/livesub/cli.py", "        t.api_key = args.llm_key or t.api_key", "        pass"),
+    ("src/livesub/cli.py", "    t.check()", "    pass"),
+    ("src/livesub/live.py", "            hurry = True  # a second Ctrl+C: skip the last reading, but still save what there is", "            raise"),
+    ("src/livesub/live.py", "            sys.stdout.reconfigure(errors=\"replace\")", "            pass"),
+    ("src/livesub/pipeline.py", "            if self.q.qsize() >= self.max_backlog:", "            if False:"),
     # translation
     ("src/livesub/translate.py", "return urllib.request.build_opener(urllib.request.ProxyHandler({}))", "return urllib.request.build_opener()"),
     ("src/livesub/translate.py", 'text = re.sub(r"<think>.*?</think>", "", reply, flags=re.S | re.I)', "text = reply"),
