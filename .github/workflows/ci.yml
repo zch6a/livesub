@@ -19,8 +19,8 @@ jobs:
           python-version: ${{ matrix.python }}
       # Install the package itself (not just its test dependencies), so the build settings and the
       # `livesub` entry point are checked too. faster-whisper and soundcard are optional and not needed
-      # by the tests, which use synthetic audio and a scripted recognizer.
-      - run: uv venv
+      # by the tests, which use synthetic audio and a scripted recognizer. (setup-uv with python-version
+      # already creates and activates .venv.)
       - run: uv pip install -e . pytest ruff
       - run: uv run --no-project livesub --version
       - run: uv run --no-project livesub file --help
