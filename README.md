@@ -1,21 +1,37 @@
+<div align="center">
+
 # livesub
 
-Live captions for anything your computer plays or hears — a video call, a lecture stream, a game, a
-podcast — recognized on your own machine with Whisper, optionally translated, in a caption bar that
-floats over every window.
+**Offline live captions for anything your computer plays or hears, with optional translation.**
 
-- **Offline.** Speech recognition runs locally ([faster-whisper](https://github.com/SYSTRAN/faster-whisper),
-  CPU or CUDA). Translation goes to an OpenAI-compatible endpoint *you* choose; point it at a local
-  model (Ollama, LM Studio, llama.cpp) and nothing leaves your computer.
-- **Captions that do not flicker.** Each word is shown dimmed while it is being recognized and turns
-  white only when two readings in a row agree on it (*local agreement*); committed words never change.
-- **System-wide.** Captures what the speakers play (WASAPI loopback on Windows, monitor sources on
+<a href="https://github.com/zch6a/livesub/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/zch6a/livesub/actions/workflows/ci.yml/badge.svg"></a>
+<img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white">
+<img alt="Runs offline" src="https://img.shields.io/badge/runs-offline-2ea44f">
+<a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
+
+**English** · [简体中文](README.zh-CN.md)
+
+</div>
+
+---
+
+A video call, a lecture stream, a game, a podcast: livesub recognizes the speech on your own machine
+with Whisper and shows it in a caption bar that floats over every window, optionally with a
+translation underneath.
+
+- **Offline.** Speech recognition runs locally with [faster-whisper](https://github.com/SYSTRAN/faster-whisper),
+  on the CPU or a CUDA GPU. Translation goes to an OpenAI-compatible endpoint *you* choose. Point it at
+  a local model (Ollama, LM Studio, llama.cpp) and nothing leaves your computer.
+- **Captions that don't flicker.** A word is shown dimmed while it is being recognized. It turns white
+  only once two readings in a row agree on it, and from then on it never changes.
+- **System-wide.** It captures what your speakers play (WASAPI loopback on Windows, monitor sources on
   Linux) or a microphone.
-- **Subtitles too.** `livesub file` runs a recording through the same live loop and writes SRT or WebVTT,
-  original, translated, or both.
+- **Subtitle files too.** `livesub file` runs a recording through the same live loop and writes SRT or
+  WebVTT: original, translated, or both.
 
-> Status: 0.1, in development. The pipeline is tested end to end with synthetic audio and a scripted
-> recognizer; see [POLISH_LOG.md](POLISH_LOG.md).
+> **Status: 0.1, in development.** Recognition has been checked end to end with real Whisper on English
+> and Chinese speech from text-to-speech. The rest of the pipeline is covered by 74 tests on synthetic
+> audio. See [POLISH_LOG.md](POLISH_LOG.md).
 
 ## Install
 
@@ -23,8 +39,14 @@ floats over every window.
 pip install "livesub[all] @ git+https://github.com/zch6a/livesub"
 ```
 
-`[all]` adds faster-whisper and soundcard. The Whisper model (`small` by default, about 0.5 GB) is
-downloaded once, on first use.
+`[all]` adds faster-whisper and soundcard. The Whisper model is downloaded once, the first time you use it.
+
+**GPU (optional).** CTranslate2 needs CUDA 12 cuBLAS and cuDNN 9. If they are missing, livesub says so
+and runs on the CPU:
+
+```bash
+pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+```
 
 ## Use
 
@@ -37,9 +59,23 @@ livesub file talk.wav -o talk.srt             # subtitle a recording
 livesub devices
 ```
 
-Drag the caption bar anywhere; double-click it or press Esc to stop. `--model` picks the Whisper size
-(`tiny` … `large-v3`, `turbo`): larger is more accurate and slower. `--step` sets how often the
-recognizer re-reads what is being said (default every second).
+Drag the caption bar anywhere. Double-click it or press Esc to stop.
+
+### Which model
+
+Live, the recognizer has to re-read the current sentence faster than it grows. Here is the time to
+read one 8-second window on a laptop CPU (int8), measured with `faster-whisper`:
+
+| model | size | 8 s window on a CPU | live on a CPU? |
+|---|---|---|---|
+| `tiny` | 75 MB | 0.33 s | yes, least accurate |
+| `base` | 145 MB | 0.60 s | yes (**default on a CPU**) |
+| `small` | 480 MB | 1.7 s | lags about 2 s (**default on a GPU and for files**) |
+| `medium`, `large-v3`, `turbo` | 1.5–3 GB | — | GPU only |
+
+Pass `--model` to choose a different one, and `--language` when you know the language: it skips
+detection and avoids mistakes on short phrases. For Chinese, livesub steers Whisper towards
+Simplified characters, which it otherwise often mixes with Traditional ones.
 
 ## How it works
 
@@ -51,19 +87,25 @@ audio ─▶ resample to 16 kHz ─▶ voice activity ─▶ speech buffer ─(e
         └── translation ◀── cues ◀── line breaking (2 lines, CJK-aware)
 ```
 
-- **Voice activity**: an energy detector with an adaptive noise floor decides *when* to run Whisper,
-  so silence costs nothing and Whisper is not asked to transcribe it (which is when it invents text).
-- **Local agreement** (Macháček et al., 2023): the recognizer re-reads the growing buffer; the words
-  two readings agree on, from the start, are committed. A buffer that grows past 12 s is cut after the
-  last committed word, so recognition time stays bounded however long someone talks.
-- **Cues** close at a sentence end, a pause, or when two lines are full; lines break between Latin
-  words and anywhere in Chinese or Japanese, but never before closing punctuation.
+- **Voice activity.** An energy detector with an adaptive noise floor decides *when* to run Whisper.
+  Silence costs nothing, and Whisper is never asked to transcribe it, which is when it tends to invent
+  text.
+- **Local agreement** ([Macháček et al., 2023](https://arxiv.org/abs/2307.14743)). The recognizer re-reads
+  the growing buffer, and the words that two consecutive readings agree on are committed. New words
+  are lined up with the committed text by their *words*, not their timestamps: Whisper's times shift
+  between readings, and in a real run, aligning by time silently dropped words. A buffer longer than
+  12 s is cut after the last committed word, so recognition time stays bounded however long someone
+  talks.
+- **Cues.** A cue closes at the end of a sentence, at a pause, or when two lines are full. In that last
+  case it ends at a comma when it can, so a short tail isn't left on its own. Lines break between Latin
+  words, and anywhere in Chinese or Japanese except before closing punctuation.
 
 ## Develop
 
 ```bash
 uv venv && uv pip install numpy pytest
 uv run pytest
+python scripts/mutate.py      # test the tests: 32 planted bugs, each must make a test fail
 ```
 
 ## License

@@ -114,3 +114,12 @@ def test_bad_settings_are_refused():
         LiveCaptioner(ScriptedTranscriber([]), step=0.1)
     with pytest.raises(ValueError):
         LiveCaptioner(ScriptedTranscriber([]), step=5, max_buffer=8)
+
+
+def test_the_prompt_never_repeats_words_still_in_the_window():
+    # Given words it can still hear in its prompt, Whisper tends to skip them (seen in a real run).
+    _, asr, _, _ = caption(TALK, 18.0)
+    for offset, end, prompt in asr.calls:
+        inside = [w for w in TALK if w.start >= offset and w.end <= end]
+        if len(inside) >= 3:
+            assert join(inside[:3]) not in prompt, (offset, end, prompt)

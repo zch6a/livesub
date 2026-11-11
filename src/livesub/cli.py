@@ -21,10 +21,16 @@ from .translate import ChatTranslator, TranslationError
 
 
 def make_transcriber(args):
-    from .asr import FasterWhisper
+    from .asr import FasterWhisper, resolve_device
 
-    print(f"loading Whisper model '{args.model}' (downloaded once on first use)...", file=sys.stderr)
-    return FasterWhisper(args.model, device=args.device, compute_type=args.compute_type)
+    device = resolve_device(args.device)
+    model = args.model
+    if model is None:
+        # Live, the model must read a window faster than it grows: on a laptop CPU "small" takes about
+        # 1.7 s per 8 s window (captions fall 2 s behind), "base" 0.6 s. A file has no such deadline.
+        model = "small" if device == "cuda" or args.command == "file" else "base"
+    print(f"loading Whisper '{model}' on the {device.upper()} (downloaded once, on first use)...", file=sys.stderr)
+    return FasterWhisper(model, device=device, compute_type=args.compute_type)
 
 
 def make_translator(args):
@@ -43,7 +49,7 @@ def make_translator(args):
 
 def _common(p: argparse.ArgumentParser) -> None:
     g = p.add_argument_group("recognition")
-    g.add_argument("--model", default="small", help="Whisper model: tiny, base, small, medium, large-v3, turbo, distil-large-v3 (default: small)")
+    g.add_argument("--model", default=None, help="Whisper model: tiny, base, small, medium, large-v3, turbo, distil-large-v3 (default: small, or base for live captions on a CPU)")
     g.add_argument("--device", default="auto", help="auto, cpu or cuda")
     g.add_argument("--compute-type", default="default", help="e.g. int8 on CPU, float16 on a GPU")
     g.add_argument("--language", help="spoken language code (en, zh, ja, ...); default: detect")

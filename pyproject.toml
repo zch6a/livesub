@@ -8,6 +8,10 @@ requires-python = ">=3.10"
 dependencies = ["numpy>=1.24"]
 keywords = ["captions", "subtitles", "speech-to-text", "whisper", "faster-whisper", "translation", "accessibility", "offline"]
 
+[project.urls]
+Homepage = "https://github.com/zch6a/livesub"
+Issues = "https://github.com/zch6a/livesub/issues"
+
 [project.optional-dependencies]
 whisper = ["faster-whisper>=1.0"]
 capture = ["soundcard>=0.4"]

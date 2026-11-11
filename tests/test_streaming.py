@@ -81,4 +81,18 @@ def test_a_reworded_last_word_is_not_lost_either():
     a.flush()
     a.insert(words((0.45, " are"), (0.8, " here")))
     a.flush()
-    assert join(a.committed).endswith("here")
+    assert join(a.committed) == "we were are here"  # a possible duplicate, rather than a lost word
+
+
+def test_a_continuation_smeared_far_back_is_anchored_on_the_previous_guess():
+    # As in the real run, but with "harder" smeared to end before the last committed word even began:
+    # no time rule can tell it from an old word; the previous guess, which began with "harder", can.
+    a = Agreement()
+    a.insert([Word(6.6, 6.8, " why"), Word(6.82, 7.0, " they"), Word(7.0, 7.16, " are"), Word(7.16, 7.42, " har-")])
+    a.flush()
+    a.insert([Word(6.6, 6.8, " why"), Word(6.82, 7.0, " they"), Word(7.0, 7.16, " are"), Word(7.16, 7.42, " harder"), Word(7.42, 7.66, " than")])
+    assert join(a.flush()) == "why they are"
+    a.insert([Word(6.3, 6.9, " harder"), Word(6.9, 7.6, " than"), Word(7.64, 7.8, " they"), Word(7.8, 8.04, " look.")])
+    a.flush()
+    a.finish()
+    assert join(a.committed) == "why they are harder than they look."
