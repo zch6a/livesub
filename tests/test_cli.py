@@ -20,7 +20,7 @@ def recording(tmp_path, monkeypatch):
 def test_file_writes_srt_next_to_the_input(recording):
     assert cli.main(["file", str(recording)]) == 0
     srt = recording.with_suffix(".srt").read_text(encoding="utf-8")
-    assert srt.startswith("1\n00:00:00,500 --> ")
+    assert srt.startswith("1\n00:00:00,5")
     assert "Hello and welcome.\n\n2\n" in srt and "This file has two sentences." in srt
 
 

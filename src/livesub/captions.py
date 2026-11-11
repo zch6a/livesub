@@ -14,6 +14,7 @@ from dataclasses import dataclass, replace
 from .streaming import Word, join
 
 SENTENCE_END = tuple(".!?。！？…")
+CLAUSE_END = tuple(",;:，、；：")
 # Kinsoku: punctuation that must not begin a line; it stays with the character before it.
 NO_LINE_START = set("，。、！？；：）」』】》〉,.!?;:)]}…%")
 
@@ -94,12 +95,13 @@ class CueBuilder:
     def add(self, words: list[Word]) -> list[Cue]:
         out: list[Cue] = []
         for w in words:
-            if self.words:
-                gap = w.start - self.words[-1].end > self.max_gap
-                full = len(wrap(join(self.words + [w]), self.max_width)) > self.max_lines
-                long = w.end - self.words[0].start > self.max_duration
-                if gap or full or long:
-                    out.append(self._close())
+            if self.words and w.start - self.words[-1].end > self.max_gap:
+                out.append(self._close())
+            while self.words and (len(wrap(join(self.words + [w]), self.max_width)) > self.max_lines
+                                  or w.end - self.words[0].start > self.max_duration):
+                # Full: end the cue at its last clause boundary if there is one in its second part, and
+                # carry the rest over, rather than leave "they look." alone on the next cue.
+                out.append(self._close(self._clause_end()))
             self.words.append(w)
             if w.text.rstrip().endswith(SENTENCE_END):
                 out.append(self._close())
@@ -111,10 +113,15 @@ class CueBuilder:
     def flush(self) -> list[Cue]:
         return [self._close()] if self.words else []
 
-    def _close(self) -> Cue:
-        cue = Cue(self.words[0].start, self.words[-1].end, join(self.words))
-        self.words = []
-        return cue
+    def _clause_end(self) -> int | None:
+        for j in range(len(self.words) - 2, len(self.words) // 3 - 1, -1):
+            if self.words[j].text.rstrip().endswith(CLAUSE_END):
+                return j + 1
+        return None
+
+    def _close(self, n: int | None = None) -> Cue:
+        done, self.words = self.words[:n], self.words[len(self.words) if n is None else n:]
+        return Cue(done[0].start, done[-1].end, join(done))
 
 
 def display_times(cues: list[Cue], min_duration: float = 1.0, lead_out: float = 0.3) -> list[Cue]:

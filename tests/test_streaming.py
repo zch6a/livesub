@@ -49,3 +49,36 @@ def test_a_contradicting_guess_resets_the_comparison():
     assert a.flush() == []
     a.insert(words((0.0, " ice"), (0.3, " cream")))
     assert join(a.flush()) == "ice cream"
+
+
+def test_replay_of_a_real_whisper_run_loses_no_words():
+    # faster-whisper "small" on Windows text-to-speech, readings 1 s apart (times as it gave them).
+    # On the last reading it returned only the continuation, with "harder" put 0.7 s too early; an
+    # earlier version filtered words by time and lost "harder than".
+    W = lambda s: [Word(float(a), float(b), " " + t) for t, a, b in (x.split("|") for x in s.split())]
+    readings = [
+        "Today|3.50|3.84 we|3.84|4.08 are|4.08|4.24 going|4.24|4.46 to|4.46|4.72 talk...|4.72|4.88",
+        "Today|3.50|3.82 we|3.82|4.08 are|4.08|4.24 going|4.24|4.46 to|4.46|4.70 talk|4.70|4.94 about|4.94|5.18 live|5.18|5.46 captions.|5.46|5.78",
+        "today|3.50|3.82 we|3.82|4.08 are|4.08|4.24 going|4.24|4.46 to|4.46|4.70 talk|4.70|4.96 about|4.96|5.18 live|5.18|5.44 captions|5.44|5.88 and|5.88|6.60 why|6.60|6.82 they|6.82|7.00 are|7.00|7.08",
+        "Today|3.50|3.82 we|3.82|4.08 are|4.08|4.24 going|4.24|4.46 to|4.46|4.70 talk|4.70|4.94 about|4.94|5.18 live|5.18|5.46 captions,|5.46|5.88 and|6.46|6.62 why|6.62|6.82 they|6.82|7.00 are|7.00|7.16 harder|7.16|7.42 than|7.42|7.66 they|7.66|7.80 look.|7.80|8.00",
+        "harder|6.44|7.04 than|7.04|7.64 they|7.64|7.80 look.|7.80|8.04",
+    ]
+    a = Agreement()
+    for r in readings:
+        a.insert(W(r))
+        a.flush()
+    a.finish()
+    assert join(a.committed) == "Today we are going to talk about live captions and why they are harder than they look."
+
+
+def test_a_reworded_last_word_is_not_lost_either():
+    a = Agreement()
+    for _ in range(2):
+        a.insert(words((0.0, " we"), (0.4, " were")))
+        a.flush()
+    # The next reading rewords the committed tail and continues: no textual anchor, so times decide.
+    a.insert(words((0.45, " are"), (0.8, " here")))
+    a.flush()
+    a.insert(words((0.45, " are"), (0.8, " here")))
+    a.flush()
+    assert join(a.committed).endswith("here")

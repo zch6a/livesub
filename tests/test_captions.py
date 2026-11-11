@@ -76,3 +76,22 @@ def test_words_keep_their_own_spacing():
     b = CueBuilder()
     b.add([Word(0, 0.2, " It"), Word(0.2, 0.4, "'s"), Word(0.4, 0.6, " fine.")])
     assert b.words == []
+
+
+def test_slow_speech_still_closes_a_cue_within_seven_seconds():
+    # Few words, pauses just under the gap limit: neither full nor a pause, but too long to keep up.
+    b = CueBuilder()
+    cues = b.add(script("so we will see what happens next then", 0.0, word=0.5, gap=1.0)) + b.flush()
+    assert len(cues) >= 2
+    assert all(c.end - c.start <= 7.0 for c in cues)
+
+
+def test_a_full_cue_ends_at_a_clause_boundary_instead_of_orphaning_the_last_words():
+    # From a real run: "...live captions, and why they are harder than" / "they look."
+    b = CueBuilder()
+    cues = b.add(script("Today we are going to talk about live captions, and why they are harder than they look.", 0.0, word=0.25, gap=0.05))
+    assert [c.text for c in cues] == ["Today we are going to talk about live captions,", "and why they are harder than they look."]
+    # Without a clause boundary in the second part, it still breaks where the cue is full.
+    b2 = CueBuilder(max_width=20)
+    cues = b2.add(script("one two three four five six seven eight nine ten eleven", 0.0, word=0.2, gap=0.05)) + b2.flush()
+    assert all(len(wrap(c.text, 20)) <= 2 for c in cues) and " ".join(c.text for c in cues).startswith("one two")

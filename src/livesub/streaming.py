@@ -31,20 +31,33 @@ class Agreement:
         self.committed: list[Word] = []
         self.buffer: list[Word] = []  # the previous guess, after the committed words
         self.new: list[Word] = []
+        self.last_start = -1.0  # start of the last committed word
         self.last_end = 0.0
         self.ngram = ngram
 
     def insert(self, words: list[Word]) -> None:
         """A new guess for the current window. Words the committed text already covers are dropped."""
-        new = [w for w in words if w.start > self.last_end - 0.1]
-        # The window usually starts before the last committed word ends, so a guess often repeats the
-        # committed tail ("... the cat sat" then "sat on the mat"): drop the longest such overlap.
-        if new and self.committed and abs(new[0].start - self.last_end) < 1.0:
-            for n in range(min(self.ngram, len(self.committed), len(new)), 0, -1):
-                if [norm(w.text) for w in self.committed[-n:]] == [norm(w.text) for w in new[:n]]:
-                    new = new[n:]
-                    break
-        self.new = new
+        # Where does the new guess continue the committed text? Found by the words, not by their times:
+        # Whisper's timestamps shift between readings, and in a real run it once returned only the
+        # continuation ("harder than they look") with "harder" placed 0.7 s too early — before the last
+        # committed word — so filtering by time silently lost words. Times only break ties.
+        new = list(words)
+        texts = [norm(w.text) for w in new]
+        tail = [norm(w.text) for w in self.committed[-self.ngram:]]
+        start = None
+        # 1. After the longest committed tail the guess repeats ("... the cat sat" then "the cat sat on").
+        for k in range(min(len(tail), len(new)), 0, -1):
+            hits = [i for i in range(len(new) - k + 1) if texts[i:i + k] == tail[-k:]]
+            hits = [i for i in hits if abs(new[i + k - 1].end - self.last_end) < 2.0]
+            if hits:
+                start = min(hits, key=lambda i: abs(new[i + k - 1].end - self.last_end)) + k
+                break
+        # 2. Or where the previous, uncommitted guess began.
+        if start is None and self.buffer:
+            first = norm(self.buffer[0].text)
+            start = next((i for i, w in enumerate(new) if texts[i] == first and abs(w.start - self.buffer[0].start) < 1.5), None)
+        # 3. Or, with nothing to align on, by time: words that end after the last committed one began.
+        self.new = new[start:] if start is not None else [w for w in new if w.end > self.last_start]
 
     def flush(self) -> list[Word]:
         """Commit the words on which the last two guesses agree; returns them."""
@@ -55,6 +68,14 @@ class Agreement:
         self.buffer, self.new = self.new, []
         self._commit(out)
         return out
+
+    def cut_point(self) -> float:
+        """Where the audio before can be dropped: after the last committed word, but not past the first
+        word still being recognized (the committed word's end time may be stretched over it)."""
+        cut = self.last_end
+        if self.buffer:
+            cut = min(cut, self.buffer[0].start)
+        return max(cut, self.last_start)
 
     def tentative(self) -> list[Word]:
         return list(self.buffer)
@@ -68,6 +89,7 @@ class Agreement:
     def _commit(self, words: list[Word]) -> None:
         if words:
             self.committed.extend(words)
+            self.last_start = words[-1].start
             self.last_end = words[-1].end
             del self.committed[:-50]  # only the tail is ever compared or used as a prompt
 

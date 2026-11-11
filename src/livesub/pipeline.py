@@ -102,7 +102,9 @@ class LiveCaptioner:
         audio = np.concatenate(self._buf) if self._buf else np.zeros(0, np.float32)
         self.runs += 1
         self.longest_window = max(self.longest_window, len(audio) / RATE)
-        prompt = join(self.agreement.committed)[-200:]
+        # Only text whose audio has been cut from the window. With committed words still in the window
+        # in its prompt, Whisper tends to skip them and smear the times of what follows.
+        prompt = join([w for w in self.agreement.committed if w.end <= self._buf_start + 0.05])[-200:]
         words = self.transcriber.transcribe(audio, offset=self._buf_start, prompt=prompt, language=self.language)
         self.agreement.insert(words)
         self._emit(self.builder.add(self.agreement.flush()))
@@ -118,12 +120,12 @@ class LiveCaptioner:
         self._partial()
 
     def _trim(self) -> None:
-        cut = self.agreement.last_end
+        cut = self.agreement.cut_point()
         if cut <= self._buf_start + 1.0:
             # Nothing settled in the whole window (or barely): settle the current guess rather than
             # let the window grow without bound.
             self._emit(self.builder.add(self.agreement.finish()))
-            cut = self.agreement.last_end
+            cut = self.agreement.cut_point()
         if cut <= self._buf_start:
             cut = self.time - self.step  # no words at all: keep only the last step of audio
         audio = np.concatenate(self._buf)

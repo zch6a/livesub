@@ -42,18 +42,27 @@ class ScriptedTranscriber:
     """Returns the scripted words inside the audio window. A word still being spoken when the window
     ends comes back as a wrong, truncated guess ("hel-"), as a real recognizer's would."""
 
-    def __init__(self, timeline: list[Word], unstable_tail: bool = True):
+    def __init__(self, timeline: list[Word], unstable_tail: bool = True, whisper_times: bool = True):
         self.timeline = timeline
         self.unstable_tail = unstable_tail
+        self.whisper_times = whisper_times
         self.calls: list[tuple[float, float, str]] = []
 
     def transcribe(self, audio, *, offset=0.0, prompt="", language=None):
         end = offset + len(audio) / RATE
         self.calls.append((offset, end, prompt))
         out = [w for w in self.timeline if w.start >= offset - 0.05 and w.end <= end]
-        if self.unstable_tail:
+        if self.unstable_tail and len(self.calls) % 2:
+            # A word still being spoken at the window's end: a wrong guess on odd readings; left out on
+            # even ones, where (below) the word before it is stretched over it, as Whisper often does.
             cut = [w for w in self.timeline if w.start < end - 0.05 < w.end and w.start >= offset - 0.05]
             for w in cut:
                 stem = w.text.strip()
                 out.append(Word(w.start, end, (" " if w.text.startswith(" ") else "") + stem[: max(1, len(stem) // 2)] + "-"))
+        if self.whisper_times and out:
+            # Like Whisper's word timestamps: each reading shifts them by up to a tenth of a second, and
+            # the last word of the window is stretched to the window's end.
+            j = [0.1, -0.1, 0.08, -0.06, 0.0][len(self.calls) % 5]
+            out = [Word(round(w.start + j, 3), round(w.end + j, 3), w.text) for w in out]
+            out[-1] = Word(out[-1].start, max(out[-1].end, end), out[-1].text)
         return out
