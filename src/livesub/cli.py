@@ -32,8 +32,6 @@ def make_transcriber(args):
         # 8 s window, "base" 0.6 s. A file is read once per stretch of speech, so "small" is fast enough.
         model = "small" if device == "cuda" or args.command == "file" else "base"
     print(f"loading Whisper '{model}' on the {device.upper()} (downloaded once, on first use)...", file=sys.stderr)
-    if not 1 <= args.beam <= 10:
-        raise ValueError("--beam must be 1 to 10")
     return FasterWhisper(model, device=device, compute_type=args.compute_type, beam_size=args.beam)
 
 
@@ -52,13 +50,26 @@ def make_translator(args):
     return t
 
 
+def _int_range(lo: int, hi: int):
+    def parse(text: str) -> int:
+        try:
+            v = int(text)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"{text!r} is not a whole number") from None
+        if not lo <= v <= hi:
+            raise argparse.ArgumentTypeError(f"must be {lo} to {hi}")
+        return v
+
+    return parse
+
+
 def _common(p: argparse.ArgumentParser) -> None:
     g = p.add_argument_group("recognition")
     g.add_argument("--model", default=None, help="Whisper model: tiny, base, small, medium, large-v3, turbo, distil-large-v3 "
                    "(default: small, or base for live captions on a CPU)")
     g.add_argument("--device", default="auto", help="auto, cpu or cuda")
     g.add_argument("--compute-type", default="default", help="e.g. int8 on CPU, float16 on a GPU")
-    g.add_argument("--beam", type=int, default=5, help="beam size: 1 is about twice as fast on a CPU, and less accurate (default: 5)")
+    g.add_argument("--beam", type=_int_range(1, 10), default=5, help="beam size: 1 is about twice as fast on a CPU, and less accurate (default: 5)")
     g.add_argument("--language", help="spoken language code (en, zh, ja, ...); default: detect")
     g.add_argument("--step", type=float, default=1.0, help="seconds between re-readings (lower = quicker captions, more work)")
     t = p.add_argument_group("translation (optional)")

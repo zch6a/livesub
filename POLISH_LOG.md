@@ -78,3 +78,20 @@ Each round goes through the whole project: code, tests, docs, and actually runni
 - **Engineering**: ruff (E, F, W, B, UP, SIM, I) is clean. A `.gitattributes` keeps LF line endings: a `git stash pop` had rewritten files with CRLF, which broke multi-line edits. CONTRIBUTING (how the tests work; checking against real Whisper without recording anyone) and CHANGELOG were added.
 - 99 tests, 46 of 46 mutants caught.
 - **Still not verified**: capture from a real sound card (it would record whatever this machine plays), and the GPU path (CUDA libraries not installed here).
+
+## Round 2
+
+A new user's first run: a fresh clone into an empty folder, a new virtual environment, `pip install -e ".[all]"` (23 s), and then every command in the README.
+
+- **Recordings other than WAV were refused.** That is the first thing most people try (`livesub file lecture.mp4`), and it failed with "not a PCM WAV file". faster-whisper already installs a decoder (PyAV), so `livesub file` now reads MP3, M4A, MP4, MKV and the rest directly, resampled to 16 kHz mono. Checked with an AAC file made from the test speech, which transcribed correctly. Without PyAV the old message remains, now suggesting `livesub[whisper]` before ffmpeg. A test builds an M4A file and checks its pitch and length, an unreadable file and a missing one.
+- **`livesub --help` showed no examples.** It now lists four, and the README's file example uses `lecture.mp4`.
+- **`--beam 0` was checked only after the input file had been read.** argparse now rejects it at once ("must be 1 to 10").
+- **Checked and fine:**
+  - the early errors: wrong device, bad `--save` name, `--translate-to` without a model. Each arrives in about a second, before the model loads, and says what to do;
+  - `livesub devices`;
+  - a missing input file;
+  - the offline claim: with every proxy variable pointing at a dead port, `livesub file` started from the cached model in 7.7 s and never tried the network.
+- **A false alarm, recorded so it is not chased again**: a wrong `--input-device` seemed to exit silently. The message was there; my own output filter had dropped it.
+- **Known limitation**: on fast speech, Whisper `small` sometimes writes no punctuation at all. Every word is right, but cues then break only when they are full, sometimes mid-phrase. This comes from the model, not from livesub; it is not worked around.
+- **Not testable here**: translation with a real model (no Ollama, LM Studio or llama.cpp server on this machine; only the fake endpoint in the tests), live capture, and the GPU. The README now says all three.
+- 101 tests, ruff clean.

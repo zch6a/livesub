@@ -20,9 +20,9 @@
 - **离线。** 语音识别用 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) 在本地运行，CPU 或 CUDA 显卡都可以。翻译发给你自己选的、兼容 OpenAI 接口的服务；指向本地模型（Ollama、LM Studio、llama.cpp），数据就不会离开你的电脑。
 - **字幕不闪。** 正在识别的词显示为灰色，只有连续两次识别结果一致才变成白色，之后不会再改。
 - **系统级。** 可以采集扬声器正在播放的声音（Windows 用 WASAPI 回环，Linux 用 monitor 源），也可以用麦克风。
-- **也能出字幕文件。** `livesub file` 为录音输出 SRT 或 WebVTT：原文、译文或双语。
+- **也能出字幕文件。** `livesub file` 为录音（WAV、MP3、M4A、MP4、MKV 等）输出 SRT 或 WebVTT：原文、译文或双语。
 
-> **状态：0.1，开发中。** 已用真实 Whisper 对文字转语音生成的英文和中文语音做过端到端验证，包括快语速、有噪声、有背景音乐和中英夹杂的语音；其余流程（包括实时模式）由 99 个基于合成音频的测试覆盖。作者还没有在真实声卡上测试过实时采集。详见 [POLISH_LOG.md](POLISH_LOG.md)。
+> **状态：0.1，开发中。** 已用真实 Whisper 对文字转语音生成的英文和中文语音做过端到端验证，包括快语速、有噪声、有背景音乐和中英夹杂的语音；其余流程（包括实时模式）由 99 个基于合成音频的测试覆盖。作者还没有在真实声卡上测试过实时采集；翻译只对模拟的接口测试过，还没接过真实模型。详见 [POLISH_LOG.md](POLISH_LOG.md)。
 
 ## 安装
 
@@ -45,7 +45,7 @@ livesub live                                  # 给电脑正在播放的声音�
 livesub live --source mic --console           # 用麦克风，在终端里显示
 livesub live --language en --translate-to zh --llm-url http://localhost:11434/v1 --llm-model qwen2.5:7b
 livesub live --save meeting.srt               # 停止时把字幕存下来
-livesub file talk.wav -o talk.srt             # 给录音生成字幕
+livesub file lecture.mp4                      # 给录音生成字幕：输出 lecture.srt
 livesub devices
 ```
 

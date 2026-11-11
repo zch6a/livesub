@@ -26,13 +26,14 @@ translation underneath.
   only once two readings in a row agree on it, and from then on it never changes.
 - **System-wide.** It captures what your speakers play (WASAPI loopback on Windows, monitor sources on
   Linux) or a microphone.
-- **Subtitle files too.** `livesub file` writes SRT or WebVTT for a recording: original, translated, or
-  both.
+- **Subtitle files too.** `livesub file` writes SRT or WebVTT for a recording (WAV, MP3, M4A, MP4, MKV, …):
+  original, translated, or both.
 
 > **Status: 0.1, in development.** Recognition has been checked end to end with real Whisper on English
 > and Chinese speech from text-to-speech, including fast, noisy, music-backed and mixed-language
 > speech. The rest of the pipeline, live mode included, is covered by 99 tests on synthetic audio. Live
-> capture from a real sound card has not been tested by the author yet. See [POLISH_LOG.md](POLISH_LOG.md).
+> capture from a real sound card has not been tested by the author yet, and translation only against a
+> stand-in endpoint, not a real model. See [POLISH_LOG.md](POLISH_LOG.md).
 
 ## Install
 
@@ -56,7 +57,7 @@ livesub live                                  # caption what the computer plays,
 livesub live --source mic --console           # a microphone, in the terminal
 livesub live --language en --translate-to zh --llm-url http://localhost:11434/v1 --llm-model qwen2.5:7b
 livesub live --save meeting.srt               # keep the captions when you stop
-livesub file talk.wav -o talk.srt             # subtitle a recording
+livesub file lecture.mp4                      # subtitle a recording: writes lecture.srt
 livesub devices
 ```
 

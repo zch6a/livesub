@@ -72,3 +72,9 @@ def test_llm_url_still_takes_the_key_and_model_from_the_environment(monkeypatch)
     args = cli.build_parser().parse_args(["file", "x.wav", "--translate-to", "zh", "--llm-url", "https://api.example.com/v1"])
     t = cli.make_translator(args)
     assert t.api_key == "secret" and t.model == "deepseek-chat"
+
+
+def test_beam_is_checked_when_the_arguments_are_read(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["file", "x.wav", "--beam", "0"])
+    assert "must be 1 to 10" in capsys.readouterr().err
