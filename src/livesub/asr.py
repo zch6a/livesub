@@ -15,19 +15,6 @@ CREDITS = re.compile(r"字幕(由|製作|制作|提供|翻译|翻譯|組|组)|am
 
 
 class Transcriber(Protocol):
-    def _token_cap(self, seconds: float, prompt: str) -> int:
-        """How many tokens a reading may write. Speech rarely needs more than 8 a second; without a
-        cap, a window ending on a word cut in half sometimes made the decoder run on for 2.5 s
-        whatever the window's length (the worst-case lag of live captions, 3.7 s readings, down to
-        1.4 s with it). The cap applies to each 30 s chunk, and Whisper refuses a prompt plus cap over
-        448 tokens; the prompt is cut to its last 223 tokens, after 4 tokens of task and language."""
-        prompt_tokens = min(223, len(self.model.hf_tokenizer.encode(" " + prompt.strip()).ids)) if prompt else 0
-        return max(16, min(int(8 * min(seconds, 30.0)) + 16, 448 - 5 - prompt_tokens))
-
-    def warm_up(self, language: str | None = None) -> None:
-        """One throwaway reading, so that the first real one is not slowed by setting up."""
-        self.model.transcribe(np.zeros(16000, np.float32), language=language or "en", beam_size=1, temperature=0.0)
-
     def transcribe(self, audio: np.ndarray, *, offset: float = 0.0, prompt: str = "", language: str | None = None) -> list[Word]:
         """Words in 16 kHz mono `audio`, with times on the stream's clock (`offset` + time in the audio)."""
         ...
