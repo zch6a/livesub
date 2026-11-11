@@ -64,8 +64,12 @@ class LiveCaptioner:
 
     # -- feeding ------------------------------------------------------------------------------------
 
-    def feed(self, block: np.ndarray) -> None:
-        """Feed 16 kHz mono float32 audio, in blocks of any size (about 0.1 s is typical)."""
+    def feed(self, block: np.ndarray, recognize: bool = True) -> None:
+        """Feed 16 kHz mono float32 audio, in blocks of any size (about 0.1 s is typical).
+
+        `recognize=False` defers the periodic re-reading: live, while blocks are queued up behind a slow
+        reading, it is better to take them all in and read the window once than to read it once per block.
+        The end of speech is still handled at once."""
         block = np.asarray(block, dtype=np.float32)
         self.vad.process(block)
         self.time += len(block) / RATE
@@ -83,7 +87,7 @@ class LiveCaptioner:
         if not self.vad.speaking:
             self._end_of_speech()
             return
-        if self.time - self._last_run >= self.step:
+        if recognize and self.time - self._last_run >= self.step:
             self._last_run = self.time
             self._recognize()
             if self.time - self._buf_start > self.max_buffer:
@@ -106,7 +110,7 @@ class LiveCaptioner:
         # in its prompt, Whisper tends to skip them and smear the times of what follows.
         prompt = join([w for w in self.agreement.committed if w.end <= self._buf_start + 0.05])[-200:]
         words = self.transcriber.transcribe(audio, offset=self._buf_start, prompt=prompt, language=self.language)
-        self.agreement.insert(words)
+        self.agreement.insert(words, window_start=self._buf_start)
         self._emit(self.builder.add(self.agreement.flush()))
         self._partial()
 
@@ -187,4 +191,55 @@ class TranslationWorker:
             self.on_done(done)
 
 
-__all__ = ["LiveCaptioner", "TranslationWorker", "run_file", "Word"]
+def speech_regions(audio: np.ndarray, *, vad: EnergyVAD | None = None, pad: float = 0.3, join_gap: float = 1.0,
+                   max_len: float = 30.0) -> list[tuple[float, float]]:
+    """Where the speech is in a recording, as (start, end) seconds: the VAD's speech, padded, with short
+    gaps joined, and split to at most `max_len` (Whisper reads 30 s at a time)."""
+    vad = vad or EnergyVAD()
+    states = vad.process(audio)
+    frame = vad.frame / RATE
+    raw: list[list[float]] = []
+    on = None
+    for i, s in enumerate(states + [False]):
+        if s and on is None:
+            # Speech is detected a few frames after it begins, and stops half a second after it ends.
+            on = max(0.0, i * frame - vad.start_frames * frame)
+        elif not s and on is not None:
+            raw.append([on, i * frame - vad.hang_frames * frame])
+            on = None
+    end = len(audio) / RATE
+    merged: list[list[float]] = []
+    for a, b in raw:
+        a, b = max(0.0, a - pad), min(end, b + pad)
+        if merged and a - merged[-1][1] < join_gap and b - merged[-1][0] <= max_len:
+            merged[-1][1] = b
+        else:
+            merged.append([a, b])
+    out: list[tuple[float, float]] = []
+    for a, b in merged:
+        while b - a > max_len:
+            out.append((a, a + max_len))
+            a += max_len
+        out.append((a, b))
+    return out
+
+
+def transcribe_file(transcriber: Transcriber, audio: np.ndarray, *, language: str | None = None,
+                    builder: CueBuilder | None = None, on_cue: Callable[[Cue], None] | None = None) -> list[Cue]:
+    """A recording, quickly: each speech region is read once (the live loop reads every window again
+    each second, which costs several times more and is only needed when the end is not known yet)."""
+    builder = builder or CueBuilder()
+    cues: list[Cue] = []
+    prompt = ""
+    for a, b in speech_regions(audio):
+        words = transcriber.transcribe(audio[int(a * RATE):int(b * RATE)], offset=a, prompt=prompt[-200:], language=language)
+        new = builder.add(words) + builder.flush()
+        for c in new:
+            if on_cue:
+                on_cue(c)
+        cues += new
+        prompt += " " + join(words)
+    return cues
+
+
+__all__ = ["LiveCaptioner", "TranslationWorker", "run_file", "speech_regions", "transcribe_file", "Word"]

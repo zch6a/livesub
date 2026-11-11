@@ -1,6 +1,5 @@
 from livesub.captions import Cue, CueBuilder, display_times, to_srt, to_vtt, width, wrap
 from livesub.streaming import Word
-
 from synth import cjk_script, script
 
 
@@ -12,7 +11,7 @@ def test_width_counts_cjk_double():
 
 def test_wrap_breaks_latin_between_words():
     lines = wrap("The quick brown fox jumps over the lazy dog and keeps on running far away", 42)
-    assert all(width(l) <= 42 for l in lines)
+    assert all(width(line) <= 42 for line in lines)
     assert " ".join(lines) == "The quick brown fox jumps over the lazy dog and keeps on running far away"
 
 
@@ -20,8 +19,8 @@ def test_wrap_breaks_cjk_anywhere_but_never_before_closing_punctuation():
     text = "今天我们来聊一聊离线实时字幕是怎么做出来的，以及它为什么不会闪烁。"
     lines = wrap(text, 16)
     assert "".join(lines) == text
-    assert all(width(l) <= 18 for l in lines)  # a kept punctuation mark may overhang by one character
-    assert not any(l[0] in "，。" for l in lines)
+    assert all(width(line) <= 18 for line in lines)  # a kept punctuation mark may overhang by one character
+    assert not any(line[0] in "，。" for line in lines)
 
 
 def test_wrap_mixed_scripts_and_overlong_words():

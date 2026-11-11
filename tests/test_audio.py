@@ -30,10 +30,7 @@ def test_reads_every_integer_width_and_mixes_stereo(tmp_path, width):
     scale = 2 ** (8 * width - 1) - 1
     frames = np.stack([left, right], axis=1).reshape(-1)
     ints = np.round(frames * scale).astype(np.int64)
-    if width == 1:
-        raw = (ints + 128).astype(np.uint8).tobytes()
-    else:
-        raw = b"".join(int(v).to_bytes(width, "little", signed=True) for v in ints)
+    raw = (ints + 128).astype(np.uint8).tobytes() if width == 1 else b"".join(int(v).to_bytes(width, "little", signed=True) for v in ints)
     with wave.open(str(tmp_path / "s.wav"), "wb") as w:
         w.setnchannels(2)
         w.setsampwidth(width)

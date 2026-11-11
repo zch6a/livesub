@@ -3,7 +3,6 @@ import pytest
 
 from livesub.audio import RATE
 from livesub.vad import EnergyVAD
-
 from synth import render, script
 
 
@@ -29,7 +28,7 @@ def test_finds_each_utterance_promptly_and_holds_through_the_pauses_between_word
     on, off = edges(states, frame)
     assert len(on) == 2 and len(off) == 2, (on, off)
     assert 1.0 < on[0] < 1.2 and 4.0 < on[1] < 4.2
-    for start, last_word_end in zip(off, [words[3].end, words[-1].end]):
+    for start, last_word_end in zip(off, [words[3].end, words[-1].end], strict=False):
         assert last_word_end < start < last_word_end + 0.7
 
 
@@ -95,3 +94,65 @@ def test_sound_that_never_dips_to_the_background_keeps_counting_as_speech():
     states, frame = timeline(render([Word(0.5, 6.5, " sustained")], 7.5))
     on, off = edges(states, frame)
     assert len(on) == 1 and len(off) == 1 and off[0] > 6.0
+
+
+def test_soft_words_in_a_noisy_room_do_not_end_the_sentence():
+    # Loud and soft words alternate; the soft ones are about 7 dB above the noise: clearly speech, but
+    # under a single 9 dB threshold, which would end speech in every soft stretch.
+    loud = script("so here", 1.0) + script("is", 3.0) + script("it", 4.4)
+    soft = script("is the part", 1.8) + script("we cannot", 3.4) + script("quite hear", 4.8)
+    x = render(loud, 6.5, noise_db=-40, speech_db=-25) + render(soft, 6.5, noise_db=-200, speech_db=-32, seed=1)
+    states, frame = timeline(x)
+    on, off = edges(states, frame)
+    assert len(on) == 1 and len(off) == 1, (on, off)
+
+
+def test_a_hum_after_digital_silence_is_not_speech():
+    # Loopback with nothing playing gives exact zeros; then something starts humming at -45 dBFS.
+    x = render([], 30.0, noise_db=-45)
+    x[:RATE] = 0
+    states, _ = timeline(x)
+    assert states.mean() < 0.05
+
+
+def test_a_recording_that_starts_mid_word_keeps_its_first_word():
+    words = script("hello and welcome back", 0.0)
+    states, frame = timeline(render(words, 3.0))
+    on, _ = edges(states, frame)
+    assert on and on[0] < 0.15
+
+
+def test_a_steady_sound_mistaken_for_speech_is_relearned_as_background():
+    # A loud steady sound from the very first frame (above the initial guess for the background).
+    x = render([], 40.0, noise_db=-25)
+    states, frame = timeline(x)
+    assert states[10: int(5 / frame)].all()  # taken for speech at first (after the 90 ms start) ...
+    assert not states[int(20 / frame):].any()  # ... but not for ever
+
+
+def test_a_quiet_speaker_after_a_loud_start():
+    # Something loud at first, then a very quiet room and a quiet speaker: the background estimate has
+    # to come down from the loud start to hear them.
+    words = script("can you hear me", 3.0)
+    x = render(words, 5.0, noise_db=-70, speech_db=-41)
+    x[:RATE] += np.random.default_rng(2).standard_normal(RATE).astype(np.float32) * 10 ** (-30 / 20)
+    states, frame = timeline(x)
+    on, _ = edges(states, frame)
+    assert on and 3.0 < on[-1] < 3.2
+
+
+def test_a_long_soft_passage_keeps_speech_going():
+    # Three seconds of soft words just above the "go on" threshold: the background must not creep up to them.
+    loud = script("listen", 1.0)
+    soft = script("this part is said very softly by the speaker", 1.5)
+    x = render(loud, 7.0, noise_db=-40, speech_db=-25) + render(soft, 7.0, noise_db=-200, speech_db=-34, seed=3)
+    states, frame = timeline(x)
+    on, off = edges(states, frame)
+    assert len(on) == 1 and off and off[0] > soft[-1].end
+
+
+def test_nothing_below_the_absolute_minimum_is_speech():
+    # A near-silent room (-90 dBFS) and a faint distant sound 30 dB above it, still under -50 dBFS.
+    x = render(script("far away sound", 1.0), 3.0, noise_db=-90, speech_db=-60)
+    states, _ = timeline(x)
+    assert not states.any()

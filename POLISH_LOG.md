@@ -42,3 +42,39 @@ Each round goes through the whole project: code, tests, docs, and actually runni
 - **Chinese** (Microsoft Huihui text-to-speech): correct apart from one misheard word ("实时" heard as "时时"). Whisper first wrote Traditional characters; a Simplified Chinese prompt, used when the language is Chinese, fixed that. The first Chinese file was pure silence: a PowerShell variable named `$s` overwrote `$S`. livesub correctly produced no captions for it.
 - 74 tests, 32 of 32 mutants caught. CI workflow (Ubuntu, Windows and macOS × Python 3.10 and 3.13), README in English and Chinese.
 - **Still not verified**: live capture with `soundcard`, since that would record whatever this machine is playing; and the GPU path, since the CUDA libraries are not installed here.
+
+## Round 1
+
+- **Measured on harder speech** (all generated with Windows text-to-speech; scored by word or character error rate against the script):
+  - fast speech, a 60-second talk;
+  - white noise 10 dB below the speech;
+  - a chord "music bed" under the speech and the pauses;
+  - Chinese, and Chinese mixed with English.
+
+  The first run found three problems:
+  - **Noise.** With noise at 10 dB SNR, quiet syllables fell below the single 9 dB threshold, speech kept stopping mid-sentence, and Whisper got 3-second scraps: 20% WER. The VAD now uses two thresholds: 9 dB to start, 4.5 dB to go on. While speech lasts, the background estimate does not rise. Noise is now 5.3% WER, music 4.3% (was 9.6%), Chinese 10.3% CER (was 14.9%).
+  - **Loops.** In a pause, Whisper wrote "看,看,看,看,看,看,看". Segments it rates as highly repetitive (compression ratio above 2.4) are dropped, and so is any run of four or more identical words. Three in a row ("no, no, no") is kept.
+  - **Speed.** `base` ran at 2.3× real time on Chinese in the live loop (see the live-mode fix below).
+- **A blind review** (a fresh agent with no history) reported 17 findings. All are fixed, each with a test that fails without the fix:
+  1. *Live capture lost audio while Whisper ran.* Reading the device and recognizing shared one thread, with a 0.1 s device buffer. Capture now has its own thread, a queue, and a 1 s buffer. When readings fall behind, the recognizer takes in the whole backlog and reads once. The test uses a recognizer slower than the step and checks that no mid-sentence reading leaves out more than one block.
+  2. *The README's speeds.* The reviewer measured about twice my numbers, but its measurements ran while my scoring run was also using the CPU. The README now says the figures are from an idle machine and that a busy one can take twice as long. It also explains that a slow reading adds delay rather than piling up.
+  3. *Stuck "speaking" after digital silence.* Exact zeros taught the background estimate −200 dB, and after that any hum counted as speech. Zeros are now ignored, and the first background estimate is capped at −45 dB. After 15 s of "speech" without a pause, the background is re-estimated from the 10th percentile of the last 5 s, so a steady sound stops counting.
+  4. *A new sentence lost its first word when it repeated the previous sentence's last* ("Thank you." / "[You] know"). The text alignment now matches only committed words whose audio is still in the window.
+  5. *A recognition failure hung live mode.* `close()` ran Whisper again and failed again. It now stops with "recognition failed: …".
+  6. *A traceback on every overlay close.* Tk was touched from the audio thread. `Overlay.close()` is now safe from any thread and safe to call more than once.
+  7. *A bad `--save` path lost the whole session at the end.* It is checked before the model loads, and so are the capture device and the display.
+  8. *A recording starting mid-word lost its first word.* Fixed by the capped first background estimate (item 3).
+  9. *`livesub file` was about 9× slower than needed.* It re-read every window each second. It now finds the speech regions (joined across short gaps, at most 30 s each) and reads each once: 0.13–0.21× real time with `small` on a CPU, against about 2.5× before. It is also the most accurate configuration: Chinese 1.1% CER, noise 2.1% WER. `--live-loop` keeps the old behaviour.
+  10. *"Offline" was not true at startup.* faster-whisper asked Hugging Face on every start. The model now loads from the cache first, and the network is used only to download it the first time.
+  11. *`--llm-url` ignored `LIVESUB_LLM_API_KEY` and `LIVESUB_LLM_MODEL`.* It now uses them. The help text recommends the environment variable over `--llm-key`, which ends up in shell history.
+  12. *macOS loopback failed cryptically after the model loaded.* It now fails at once and points to BlackHole; the README says so too.
+  13. *No tkinter or no display gave a traceback.* It is now a clear message suggesting `--console`; `main` also catches `OSError`.
+  14. *Shutdown could drop the last caption's translation.* Now the threads finish first, then the translation worker drains completely, then the file is saved.
+  15. *An `http_proxy` setting sent captions for a local model through the proxy.* Loopback hosts are now reached directly. The test points every proxy variable at a dead port: the old code failed there, and the new code succeeds.
+  16. *Untested paths.* There are now live-mode tests end to end, with a fake capture device and overlay. They cover recognition and capture failures, a bad save path and a slow recognizer. `FasterWhisper.transcribe` is tested against a fake model: the offset, both hallucination filters, and the Simplified-Chinese prompt. The VAD has new tests for every case above.
+  17. *CI never installed the package.* CI now installs it, runs `livesub --version` and `livesub file --help` and ruff, and builds the wheel and sdist. Locally, the wheel contains exactly the package and its license.
+- **Beam size**, measured live with `base`: greedy decoding (`--beam 1`, new option) is about 1.5–2× faster. It is a little less accurate in English and much less in Chinese (mixed language 30% CER vs 13%). The default stays 5.
+- **Mutation testing**: 46 mutants. The first run of the new set left 7 alive, each a real test gap, all now covered. Example: no test had a stretch of soft speech long enough for a rising background estimate to matter. One mutant is equivalent (the speech-region start, which the 0.3 s padding covers) and was removed, with a note in the runner.
+- **Engineering**: ruff (E, F, W, B, UP, SIM, I) is clean. A `.gitattributes` keeps LF line endings: a `git stash pop` had rewritten files with CRLF, which broke multi-line edits. CONTRIBUTING (how the tests work; checking against real Whisper without recording anyone) and CHANGELOG were added.
+- 99 tests, 46 of 46 mutants caught.
+- **Still not verified**: capture from a real sound card (it would record whatever this machine plays), and the GPU path (CUDA libraries not installed here).

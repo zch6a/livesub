@@ -33,3 +33,17 @@ packages = ["src/livesub"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 150
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "SIM", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/mutate.py" = ["E501"]  # the mutant table: one line per mutant reads best
+"tests/test_streaming.py" = ["E501"]  # recorded Whisper readings, one per line
+
+[tool.ruff.lint.isort]
+known-first-party = ["livesub", "synth", "test_translate"]

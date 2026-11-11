@@ -35,15 +35,20 @@ class Agreement:
         self.last_end = 0.0
         self.ngram = ngram
 
-    def insert(self, words: list[Word]) -> None:
-        """A new guess for the current window. Words the committed text already covers are dropped."""
+    def insert(self, words: list[Word], window_start: float | None = None) -> None:
+        """A new guess for the window that starts at `window_start`. Words the committed text already
+        covers are dropped."""
         # Where does the new guess continue the committed text? Found by the words, not by their times:
         # Whisper's timestamps shift between readings, and in a real run it once returned only the
         # continuation ("harder than they look") with "harder" placed 0.7 s too early — before the last
         # committed word — so filtering by time silently lost words. Times only break ties.
         new = list(words)
         texts = [norm(w.text) for w in new]
-        tail = [norm(w.text) for w in self.committed[-self.ngram:]]
+        # Only committed words whose audio is in this window can be repeated by it. After a pause the
+        # window starts afresh, and matching the old sentence's last word dropped a new sentence's first
+        # ("Thank you." then "[You] know, ...").
+        heard = self.committed if window_start is None else [w for w in self.committed if w.end > window_start - 0.3]
+        tail = [norm(w.text) for w in heard[-self.ngram:]]
         start = None
         # 1. After the longest committed tail the guess repeats ("... the cat sat" then "the cat sat on").
         for k in range(min(len(tail), len(new)), 0, -1):

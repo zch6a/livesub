@@ -55,7 +55,8 @@ def test_replay_of_a_real_whisper_run_loses_no_words():
     # faster-whisper "small" on Windows text-to-speech, readings 1 s apart (times as it gave them).
     # On the last reading it returned only the continuation, with "harder" put 0.7 s too early; an
     # earlier version filtered words by time and lost "harder than".
-    W = lambda s: [Word(float(a), float(b), " " + t) for t, a, b in (x.split("|") for x in s.split())]
+    def W(s):  # noqa: N802 - reads like the data it parses
+        return [Word(float(a), float(b), " " + t) for t, a, b in (x.split("|") for x in s.split())]
     readings = [
         "Today|3.50|3.84 we|3.84|4.08 are|4.08|4.24 going|4.24|4.46 to|4.46|4.72 talk...|4.72|4.88",
         "Today|3.50|3.82 we|3.82|4.08 are|4.08|4.24 going|4.24|4.46 to|4.46|4.70 talk|4.70|4.94 about|4.94|5.18 live|5.18|5.46 captions.|5.46|5.78",
@@ -96,3 +97,18 @@ def test_a_continuation_smeared_far_back_is_anchored_on_the_previous_guess():
     a.flush()
     a.finish()
     assert join(a.committed) == "why they are harder than they look."
+
+
+def test_a_new_sentence_may_begin_with_the_last_word_of_the_previous_one():
+    # Found with real Whisper: "Thank you." then, after a pause, "You know, this is a test."
+    a = Agreement()
+    for _ in range(2):
+        a.insert(words((0.5, " Thank"), (0.8, " you.")), window_start=0.3)
+        a.flush()
+    a.finish()
+    nxt = words((2.6, " You"), (2.9, " know,"), (3.2, " this"))
+    for _ in range(2):
+        a.insert(nxt, window_start=2.4)  # a new window, after the pause
+        a.flush()
+    a.finish()
+    assert join(a.committed) == "Thank you. You know, this"

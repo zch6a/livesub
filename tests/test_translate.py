@@ -95,3 +95,11 @@ def test_not_configured_means_no_translator(monkeypatch):
     monkeypatch.setenv("LIVESUB_LLM_BASE_URL", "http://localhost:11434/v1")
     t = ChatTranslator.from_env()
     assert t is not None and t.url == "http://localhost:11434/v1/chat/completions"
+
+
+def test_a_local_model_is_reached_directly_even_with_a_proxy_configured(llm, monkeypatch):
+    for var in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.setenv(var, "http://127.0.0.1:9")  # nothing listens there
+    monkeypatch.delenv("no_proxy", raising=False)
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    assert ChatTranslator(llm.url, "m").translate("Hello.", "zh") == "你好。"

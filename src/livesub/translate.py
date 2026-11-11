@@ -11,6 +11,7 @@ import json
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 
 LANGUAGES = {
@@ -49,6 +50,14 @@ class ChatTranslator:
             return None
         return cls(url, os.environ.get("LIVESUB_LLM_MODEL", "qwen2.5:7b"), os.environ.get("LIVESUB_LLM_API_KEY"))
 
+    def _opener(self) -> urllib.request.OpenerDirector:
+        """A model on this machine is reached directly: an http_proxy setting would otherwise send
+        every caption to the proxy first, which is exactly what running locally is meant to avoid."""
+        host = urllib.parse.urlsplit(self.url).hostname or ""
+        if host in ("localhost", "::1") or host.startswith("127.") or host.endswith(".localhost"):
+            return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        return urllib.request.build_opener()
+
     def translate(self, text: str, target: str, context: list[str] | tuple[str, ...] = ()) -> str:
         key = (text, target)
         if key in self.cache:
@@ -65,7 +74,7 @@ class ChatTranslator:
             headers["Authorization"] = f"Bearer {self.api_key}"
         req = urllib.request.Request(self.url, json.dumps(body).encode(), headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            with self._opener().open(req, timeout=self.timeout) as r:
                 data = json.loads(r.read().decode("utf-8"))
             reply = data["choices"][0]["message"]["content"]
         except (urllib.error.URLError, TimeoutError, OSError, KeyError, IndexError, TypeError, ValueError) as e:

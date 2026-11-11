@@ -1,8 +1,9 @@
+import re
+
 import pytest
 
 from livesub import cli
 from livesub.audio import write_wav
-
 from synth import ScriptedTranscriber, render, script
 from test_translate import FakeLLM
 
@@ -20,7 +21,7 @@ def recording(tmp_path, monkeypatch):
 def test_file_writes_srt_next_to_the_input(recording):
     assert cli.main(["file", str(recording)]) == 0
     srt = recording.with_suffix(".srt").read_text(encoding="utf-8")
-    assert srt.startswith("1\n00:00:00,5")
+    assert re.match(r"1\n00:00:00,[3-6]\d\d --> ", srt)  # 0.5 s, give or take the recognizer's jitter
     assert "Hello and welcome.\n\n2\n" in srt and "This file has two sentences." in srt
 
 
@@ -53,3 +54,16 @@ def test_help_and_version(capsys):
     with pytest.raises(SystemExit):
         cli.main(["--version"])
     assert "livesub 0.1.0" in capsys.readouterr().out
+
+
+def test_the_live_loop_is_still_available_for_files(recording):
+    assert cli.main(["file", str(recording), "--live-loop"]) == 0
+    assert "This file has two sentences." in recording.with_suffix(".srt").read_text(encoding="utf-8")
+
+
+def test_llm_url_still_takes_the_key_and_model_from_the_environment(monkeypatch):
+    monkeypatch.setenv("LIVESUB_LLM_API_KEY", "secret")
+    monkeypatch.setenv("LIVESUB_LLM_MODEL", "deepseek-chat")
+    args = cli.build_parser().parse_args(["file", "x.wav", "--translate-to", "zh", "--llm-url", "https://api.example.com/v1"])
+    t = cli.make_translator(args)
+    assert t.api_key == "secret" and t.model == "deepseek-chat"

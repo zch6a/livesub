@@ -4,6 +4,9 @@
 
 The unmutated suite must pass first; otherwise every mutant would look "caught". The repository is
 never modified: the code is copied to a temporary folder.
+
+Left out as equivalent: starting a speech region where the VAD noticed speech rather than a few frames
+earlier (the 0.3 s padding covers the difference).
 """
 
 from __future__ import annotations
@@ -24,8 +27,12 @@ MUTANTS = [
     ("src/livesub/audio.py", "v = np.where(v >= 1 << 23, v - (1 << 24), v)", "v = v"),
     # vad
     ("src/livesub/vad.py", "self.noise_db += 0.3 * (level - self.noise_db)", "self.noise_db += 0.0 * (level - self.noise_db)"),
-    ("src/livesub/vad.py", "elif level < self.noise_db + c.margin_db:", "else:"),
-    ("src/livesub/vad.py", "voice = level > max(self.noise_db + c.margin_db, c.min_db)", "voice = level > self.noise_db + c.margin_db"),
+    ("src/livesub/vad.py", "elif level < self.noise_db + c.margin_db and not self.speaking:", "elif level < self.noise_db + c.margin_db:"),
+    ("src/livesub/vad.py", "voice = level > max(self.noise_db + margin, c.min_db)", "voice = level > self.noise_db + margin"),
+    ("src/livesub/vad.py", "margin = c.stay_db if self.speaking else c.margin_db", "margin = c.margin_db"),
+    ("src/livesub/vad.py", "if level < c.silence_db:", "if False:"),
+    ("src/livesub/vad.py", "self.noise_db = min(level, c.initial_db)", "self.noise_db = level"),
+    ("src/livesub/vad.py", "self.noise_db = max(self.noise_db, float(np.percentile(self._recent, 10)))", "self.noise_db = self.noise_db"),
     ("src/livesub/vad.py", "if self._run >= (self.start_frames if voice else self.hang_frames):", "if self._run >= 1:"),
     # local agreement
     ("src/livesub/streaming.py", "start = min(hits, key=lambda i: abs(new[i + k - 1].end - self.last_end)) + k", "start = min(hits, key=lambda i: abs(new[i + k - 1].end - self.last_end))"),
@@ -36,6 +43,7 @@ MUTANTS = [
     ("src/livesub/streaming.py", "while self.new and self.buffer and norm(self.new[0].text) == norm(self.buffer[0].text):", "while self.new and self.buffer:"),
     ("src/livesub/streaming.py", 'return re.sub(r"[^\\w]", "", text.lower())', "return text"),
     ("src/livesub/streaming.py", "out, self.buffer = self.buffer, []", "out, self.buffer = [], []"),
+    ("src/livesub/streaming.py", "heard = self.committed if window_start is None else [w for w in self.committed if w.end > window_start - 0.3]", "heard = self.committed"),
     # captions
     ("src/livesub/captions.py", "return sum(2 if is_wide(c) else 0 if unicodedata.combining(c) else 1 for c in text)", "return len(text)"),
     ("src/livesub/captions.py", "if line and width(line + piece) > max_width and tok[0] not in NO_LINE_START:", "if line and width(line + piece) > max_width:"),
@@ -52,7 +60,18 @@ MUTANTS = [
     ("src/livesub/pipeline.py", "prompt = join([w for w in self.agreement.committed if w.end <= self._buf_start + 0.05])[-200:]", 'prompt = ""'),
     ("src/livesub/pipeline.py", "prompt = join([w for w in self.agreement.committed if w.end <= self._buf_start + 0.05])[-200:]", "prompt = join(self.agreement.committed)[-200:]"),
     ("src/livesub/pipeline.py", "self.context.append(cue.text)", "pass"),
+    ("src/livesub/pipeline.py", "if recognize and self.time - self._last_run >= self.step:", "if self.time - self._last_run >= self.step:"),
+    ("src/livesub/pipeline.py", "while b - a > max_len:", "while False:"),
+    # recognizer
+    ("src/livesub/asr.py", "if s.compression_ratio > 2.4:", "if False:"),
+    ("src/livesub/asr.py", "return drop_loops(words)", "return words"),
+    ("src/livesub/asr.py", "prompt = SIMPLIFIED_PROMPT + prompt", "prompt = prompt"),
+    # live command
+    ("src/livesub/cli.py", "check_save_path(args.save)", "pass"),
+    ("src/livesub/cli.py", "cap.feed(block, recognize=audio.empty())", "cap.feed(block)"),
+    ("src/livesub/cli.py", "args.llm_key or os.environ.get(\"LIVESUB_LLM_API_KEY\")", "args.llm_key"),
     # translation
+    ("src/livesub/translate.py", "return urllib.request.build_opener(urllib.request.ProxyHandler({}))", "return urllib.request.build_opener()"),
     ("src/livesub/translate.py", 'text = re.sub(r"<think>.*?</think>", "", reply, flags=re.S | re.I)', "text = reply"),
     ("src/livesub/translate.py", "if key in self.cache:", "if False:"),
     ("src/livesub/translate.py", 'user = "".join(f"Earlier: {c}\\n" for c in context) + f"Line: {text}"', 'user = f"Line: {text}"'),

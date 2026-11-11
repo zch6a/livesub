@@ -7,6 +7,7 @@ on:
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.10", "3.13"]
@@ -16,6 +17,20 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python }}
+      # Install the package itself (not just its test dependencies), so the build settings and the
+      # `livesub` entry point are checked too. faster-whisper and soundcard are optional and not needed
+      # by the tests, which use synthetic audio and a scripted recognizer.
       - run: uv venv
-      - run: uv pip install numpy pytest
+      - run: uv pip install -e . pytest ruff
+      - run: uv run --no-project livesub --version
+      - run: uv run --no-project livesub file --help
+      - run: uv run --no-project ruff check src tests scripts
       - run: uv run --no-project pytest -q
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - run: uv venv && uv pip install "dist/$(ls dist | grep whl)[all]" --dry-run

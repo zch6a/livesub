@@ -7,7 +7,7 @@ from typing import Protocol
 import numpy as np
 
 from .captions import is_wide
-from .streaming import Word
+from .streaming import Word, norm
 
 SIMPLIFIED_PROMPT = "以下是普通话的句子，使用简体中文。"
 
@@ -31,7 +31,15 @@ class FasterWhisper:
         self.device = resolve_device(device)
         if compute_type == "default":
             compute_type = "float16" if self.device == "cuda" else "int8"
-        self.model = WhisperModel(model, device=self.device, compute_type=compute_type)
+        try:
+            # From the local cache, without asking Hugging Face: once a model is downloaded, livesub
+            # starts with no network at all. (Otherwise faster-whisper checks for updates every time.)
+            self.model = WhisperModel(model, device=self.device, compute_type=compute_type, local_files_only=True)
+        except Exception:  # noqa: BLE001 - not cached yet (faster-whisper raises various errors here)
+            import sys
+
+            print(f"downloading Whisper '{model}' from Hugging Face (once; after this livesub runs offline)...", file=sys.stderr)
+            self.model = WhisperModel(model, device=self.device, compute_type=compute_type)
         self.beam_size = beam_size
         self.language: str | None = None
 
@@ -50,8 +58,25 @@ class FasterWhisper:
             # A segment it thinks is probably not speech, and is unsure about, is dropped.
             if s.no_speech_prob > 0.6 and s.avg_logprob < -1.0:
                 continue
+            # Its other one: looping on a word ("看,看,看,看,看" in a pause, seen in a real run).
+            if s.compression_ratio > 2.4:
+                continue
             words.extend(Word(offset + w.start, offset + w.end, w.word) for w in (s.words or []))
-        return words
+        return drop_loops(words)
+
+
+def drop_loops(words: list[Word], limit: int = 4) -> list[Word]:
+    """Remove a run of `limit` or more identical words, keeping the first: people rarely say a word four
+    times in a row, while a recognizer stuck in a loop does it all the time."""
+    out: list[Word] = []
+    i = 0
+    while i < len(words):
+        j = i
+        while j + 1 < len(words) and norm(words[j + 1].text) == norm(words[i].text) and norm(words[i].text):
+            j += 1
+        out.extend(words[i:i + 1] if j - i + 1 >= limit else words[i:j + 1])
+        i = j + 1
+    return out
 
 
 GPU_HINT = ("the GPU needs CUDA 12 cuBLAS and cuDNN 9: pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 "

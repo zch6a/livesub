@@ -1,12 +1,8 @@
 import threading
 
-import numpy as np
-
-from livesub.audio import RATE
 from livesub.captions import Cue
 from livesub.pipeline import LiveCaptioner, TranslationWorker, run_file
 from livesub.streaming import join
-
 from synth import ScriptedTranscriber, cjk_script, render, script
 
 TALK = (
@@ -36,7 +32,7 @@ def test_cues_follow_the_speech_in_time():
         assert c.start < c.end
         spoken = [w for w in TALK if c.start - 0.15 <= w.start and w.end <= c.end + 0.15]  # timestamps jitter
         assert join(spoken) == c.text
-    assert all(a.end <= b.start for a, b in zip(cues, cues[1:]))
+    assert all(a.end <= b.start for a, b in zip(cues, cues[1:], strict=False))
 
 
 def test_silence_costs_nothing_and_speech_about_one_run_per_step():
@@ -123,3 +119,37 @@ def test_the_prompt_never_repeats_words_still_in_the_window():
         inside = [w for w in TALK if w.start >= offset and w.end <= end]
         if len(inside) >= 3:
             assert join(inside[:3]) not in prompt, (offset, end, prompt)
+
+
+def test_sentences_that_share_a_word_across_a_pause():
+    words = script("Thank you.", 1.0) + script("You know, this is a test.", 3.0)
+    _, _, cues, _ = caption(words, 6.0)
+    assert [c.text for c in cues] == ["Thank you.", "You know, this is a test."]
+
+
+def test_speech_regions_cover_every_word_and_skip_the_silence():
+    from livesub.pipeline import speech_regions
+
+    regions = speech_regions(render(TALK, 18.0))
+    for w in TALK:
+        assert any(a <= w.start and w.end <= b for a, b in regions), w
+    assert sum(b - a for a, b in regions) < 0.8 * 18.0
+    assert all(b - a <= 30.0 for a, b in regions)
+
+
+def test_long_speech_is_split_into_regions_whisper_can_read():
+    from livesub.pipeline import speech_regions
+
+    words = script(" ".join(f"w{i}" for i in range(150)), 0.5)  # 60 s without a pause
+    regions = speech_regions(render(words, 62.0))
+    assert len(regions) >= 2 and all(b - a <= 30.0 for a, b in regions)
+
+
+def test_a_file_is_read_once_per_region_and_gives_the_same_captions():
+    from livesub.pipeline import transcribe_file
+
+    asr = ScriptedTranscriber(TALK, unstable_tail=False)
+    cues = transcribe_file(asr, render(TALK, 18.0))
+    assert " ".join(c.text for c in cues) == join(TALK)
+    assert len(asr.calls) == 3  # one per utterance, against dozens in the live loop
+    assert "flicker." in asr.calls[-1][2]  # earlier text is the prompt

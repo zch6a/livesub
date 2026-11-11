@@ -7,24 +7,29 @@ picks the latest state up from a queue on its own thread.
 
 from __future__ import annotations
 
+import contextlib
 import queue
 import sys
+import threading
 
 
 class Overlay:
     def __init__(self, font_size: int = 22, width_ratio: float = 0.7, opacity: float = 0.82, lines: int = 2):
-        import tkinter as tk  # imported here: the rest of livesub works without a display
+        try:
+            import tkinter as tk  # imported here: the rest of livesub works without a display
 
+            root = tk.Tk()
+        except Exception as e:  # noqa: BLE001 - ImportError (no python3-tk) or TclError (no display)
+            raise RuntimeError(f"the caption overlay cannot open ({e}); use --console, or install tkinter "
+                               "(python3-tk on Debian and Ubuntu)") from e
         self.tk = tk
         self.q: queue.Queue[tuple[str, str]] = queue.Queue()
-        self.root = root = tk.Tk()
+        self.root = root
         root.title("livesub")
         root.overrideredirect(True)
         root.attributes("-topmost", True)
-        try:
+        with contextlib.suppress(tk.TclError):  # some X11 window managers have no transparency
             root.attributes("-alpha", opacity)
-        except tk.TclError:  # pragma: no cover - some X11 window managers
-            pass
         root.configure(bg="#111")
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
         w = int(sw * width_ratio)
@@ -60,8 +65,14 @@ class Overlay:
         self.root.mainloop()
 
     def close(self) -> None:
-        self.closed = True
-        self.root.after(0, self.root.destroy)
+        """Close the window. Safe from any thread and more than once: tkinter itself may only be
+        touched from the thread that runs the window."""
+        if threading.current_thread() is threading.main_thread():
+            if not self.closed:
+                self.closed = True
+                self.root.destroy()
+        else:
+            self.q.put(("close", ""))
 
     # Window thread.
     def _poll(self) -> None:
@@ -71,6 +82,9 @@ class Overlay:
                 kind, value = self.q.get_nowait()
             except queue.Empty:
                 break
+            if kind == "close":
+                self.close()
+                return
             changed = True
             if kind == "text":
                 self._committed, self._tentative = value.split("\0", 1)

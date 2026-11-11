@@ -26,12 +26,13 @@ translation underneath.
   only once two readings in a row agree on it, and from then on it never changes.
 - **System-wide.** It captures what your speakers play (WASAPI loopback on Windows, monitor sources on
   Linux) or a microphone.
-- **Subtitle files too.** `livesub file` runs a recording through the same live loop and writes SRT or
-  WebVTT: original, translated, or both.
+- **Subtitle files too.** `livesub file` writes SRT or WebVTT for a recording: original, translated, or
+  both.
 
 > **Status: 0.1, in development.** Recognition has been checked end to end with real Whisper on English
-> and Chinese speech from text-to-speech. The rest of the pipeline is covered by 74 tests on synthetic
-> audio. See [POLISH_LOG.md](POLISH_LOG.md).
+> and Chinese speech from text-to-speech, including fast, noisy, music-backed and mixed-language
+> speech. The rest of the pipeline, live mode included, is covered by 99 tests on synthetic audio. Live
+> capture from a real sound card has not been tested by the author yet. See [POLISH_LOG.md](POLISH_LOG.md).
 
 ## Install
 
@@ -63,19 +64,39 @@ Drag the caption bar anywhere. Double-click it or press Esc to stop.
 
 ### Which model
 
-Live, the recognizer has to re-read the current sentence faster than it grows. Here is the time to
-read one 8-second window on a laptop CPU (int8), measured with `faster-whisper`:
+Live, the recognizer re-reads the current sentence as it grows, so the time one reading takes is how
+far the captions run behind. Here is the time to read one 8-second window on a laptop CPU (int8, an
+otherwise idle machine). A busy machine can take twice as long.
 
-| model | size | 8 s window on a CPU | live on a CPU? |
+| model | size | 8 s window on a CPU | live on a CPU |
 |---|---|---|---|
-| `tiny` | 75 MB | 0.33 s | yes, least accurate |
-| `base` | 145 MB | 0.60 s | yes (**default on a CPU**) |
-| `small` | 480 MB | 1.7 s | lags about 2 s (**default on a GPU and for files**) |
+| `tiny` | 75 MB | 0.33 s | quick, least accurate |
+| `base` | 145 MB | 0.60 s | about 1 s behind (**default on a CPU**) |
+| `small` | 480 MB | 1.7 s | about 2 s behind (**default on a GPU and for files**) |
 | `medium`, `large-v3`, `turbo` | 1.5–3 GB | — | GPU only |
 
-Pass `--model` to choose a different one, and `--language` when you know the language: it skips
-detection and avoids mistakes on short phrases. For Chinese, livesub steers Whisper towards
-Simplified characters, which it otherwise often mixes with Traditional ones.
+How accurate they are on test speech made with text-to-speech (WER, word errors; CER, character errors
+for Chinese). That is easier than real speech, so treat these numbers as a floor:
+
+| | clean | fast | 60 s talk | noise at 10 dB SNR | music bed | Chinese | Chinese + English |
+|---|---|---|---|---|---|---|---|
+| `base`, live | 2.1% | 0% | 1.9% | 5.3% | 4.3% | 10.3% | 13.3% |
+| `base`, live, `--beam 1` | 3.2% | 0% | 3.8% | 5.3% | 3.2% | 13.8% | 30% |
+| `small`, `livesub file` | 1.1% | 0% | 1.3% | 2.1% | 1.1% | 1.1% | 10% |
+
+- **Files.** `livesub file` reads each stretch of speech once. With `small` on a CPU, a recording takes
+  about a fifth of its length. `--live-loop` runs it through the live loop instead, as `livesub live`
+  would hear it, which is slower.
+- **Chinese.** `base` is weak on Chinese. Use `--model small` if a GPU is available, or accept the lag.
+  livesub steers Whisper towards Simplified characters, which it otherwise often mixes with
+  Traditional ones.
+- **On a slow CPU** `--beam 1` roughly halves the work, at some cost in accuracy, much more in Chinese.
+- Pass `--language` when you know the language: it skips detection and avoids mistakes on short
+  phrases.
+
+**Offline.** Once a model has been downloaded, livesub starts without contacting anyone. **macOS** has no
+system loopback: send the sound to a virtual device such as [BlackHole](https://github.com/ExistentialAudio/BlackHole)
+and use `--source mic --input-device BlackHole`.
 
 ## How it works
 
@@ -105,8 +126,11 @@ audio ─▶ resample to 16 kHz ─▶ voice activity ─▶ speech buffer ─(e
 ```bash
 uv venv && uv pip install numpy pytest
 uv run pytest
-python scripts/mutate.py      # test the tests: 32 planted bugs, each must make a test fail
+python scripts/mutate.py      # test the tests: 46 planted bugs, each must make a test fail
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how the tests work and how to check against real Whisper
+without recording anyone.
 
 ## License
 
