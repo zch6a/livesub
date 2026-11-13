@@ -15,7 +15,7 @@
 
 ---
 
-视频会议、网课直播、游戏、播客……livesub 在你自己的电脑上用 Whisper 识别语音，显示在一条浮在所有窗口之上的字幕条里，下面还可以附上译文。
+不论是视频会议和网课直播，还是游戏和播客，livesub 都在你自己的电脑上用 Whisper 识别语音，显示在一条浮在所有窗口之上的字幕条里，下面还可以附上译文。
 
 - **离线。** 语音识别用 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) 在本地运行，CPU 或 CUDA 显卡都可以。翻译发给你自己选的、兼容 OpenAI 接口的服务；指向本地模型（Ollama、LM Studio、llama.cpp），数据就不会离开你的电脑。
 - **字幕不闪。** 正在识别的词显示为灰色，连续两次识别结果一致才变成白色，之后不会再改。（说话结束时，最后一次识别结果直接确定，因为不会再有第二次了。）
@@ -49,7 +49,7 @@ livesub file lecture.mp4                      # 给录音生成字幕：输出 l
 livesub devices
 ```
 
-字幕条可以拖到任何位置；双击或按 Esc 退出；在终端里按 Ctrl+C（按两次会跳过最后一句）。`livesub file` 不会覆盖已有的字幕文件（比如视频旁边原有的字幕），除非加上 `--overwrite`。
+字幕条可以拖到任何位置。双击或按 Esc 退出；在终端里按 Ctrl+C（按两次会跳过最后一句）。`livesub file` 不会覆盖已有的字幕文件（比如视频旁边原有的字幕），除非加上 `--overwrite`。
 
 **翻译设置**也可以放在环境变量里，这样 API key 不会留在命令历史里：`LIVESUB_LLM_BASE_URL`（接口地址，例如 `http://localhost:11434/v1`）、`LIVESUB_LLM_MODEL`（默认 `qwen2.5:7b`）和 `LIVESUB_LLM_API_KEY`。启动前 livesub 会先检查接口能否连上（不发送任何内容）。实时模式下，如果一句话后面已经排着更新的句子，就不再翻译它，所以模型再慢也最多落后几句。
 

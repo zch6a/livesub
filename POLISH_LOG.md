@@ -186,3 +186,9 @@ livesub goes up the same way: noreply commit email, `main`, public.
 
 - **Mutation run, after the round**: 68 of 71 caught at first. #55 was a stale entry (the round-4 cap it targeted is gone) and is removed. #52, a region cut at exactly 30 s instead of at the quietest moment, survived because the test's words left 30 s between two of them; the test now also splits at 25 s, where a word is cut, and catches it. #57, the old token-cap formula, survived because of a real slip in my patching: round 4 had inserted `warm_up` into the `Transcriber` Protocol (the first `def transcribe(` in the file), and round 5 then inserted `_token_cap` before that `warm_up`, so both methods existed twice. The runner mutated the copy in the Protocol, which nothing calls. `FasterWhisper` had its own correct copies, so livesub behaved correctly, but the Protocol had to be cleaned up. Now 70 of 70 are caught.
 
+
+### 2026-11-14 — Chinese README: AI tone
+
+2 places changed: the opening list of four examples joined by 、 and ending in …… (now two pairs), and one semicolon that could be a full stop.
+The checks follow the findings of lieflat-less-ai-tone (shiujan, CC BY-NC 4.0); its findings were applied, none of its text was copied.
+Left as they were: colon-led lists, the parenthesised format and backend lists, the 而不是 sentences that state a real design choice (align by text, balanced line breaks), the tables and code blocks.
