@@ -16,30 +16,30 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.10", "3.13"]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       # Actions pinned to commits; the token is not left in the checkout.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
-        with:
-          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3; it has no moving major tag
       # Install the package itself (not just its test dependencies), so the build settings and the
       # `livesub` entry point are checked too. faster-whisper and soundcard are optional and not needed
-      # by the tests, which use synthetic audio and a scripted recognizer. (setup-uv with python-version
-      # already creates and activates .venv.)
-      - run: uv pip install -e . pytest ruff
-      - run: uv run --no-project livesub --version
-      - run: uv run --no-project livesub file --help
-      - run: uv run --no-project ruff check src tests scripts
-      - run: uv run --no-project pytest -q
+      # by the tests, which use synthetic audio and a scripted recognizer.
+      # The lock file decides every version (pytest, ruff, numpy): a changed dependency is a reviewed change.
+      - run: uv sync --locked --python ${{ matrix.python }}
+      - run: uv run --locked livesub --version
+      - run: uv run --locked livesub file --help
+      - run: uv run --locked ruff check src tests scripts
+      - run: uv run --locked pytest -q
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3; it has no moving major tag
       - run: uv build
       - run: uv venv && uv pip install "dist/$(ls dist | grep whl)[all]" --dry-run

@@ -163,9 +163,9 @@ def translate_all(translator, cues: list[Cue], target: str) -> list[Cue]:
 def cmd_file(args) -> int:
     out = args.output or args.input.with_suffix(".srt")
     check_output(out, "-o", args.overwrite)  # before an hour of transcription, not after
+    translator = make_translator(args)  # and its options before decoding the input
     audio, rate = read_audio(args.input)
     audio = resample(audio, rate, RATE)
-    translator = make_translator(args)
     transcriber = make_transcriber(args)
     print(f"{args.input}: {len(audio) / RATE:.1f} s of audio", file=sys.stderr)
     show = lambda c: print(f"[{c.start:7.2f}] {c.text}", file=sys.stderr)  # noqa: E731
@@ -190,6 +190,10 @@ def check_output(path: Path | None, flag: str, overwrite: bool) -> None:
         raise ValueError(f"{flag} {path}: the file must end in .srt or .vtt")
     if not path.resolve().parent.is_dir():
         raise ValueError(f"{flag} {path}: the folder {path.resolve().parent} does not exist")
+    if path.is_dir():
+        raise ValueError(f"{flag} {path}: that is a folder; give a file name ending in .srt or .vtt")
+    if not os.access(path.resolve().parent, os.W_OK):
+        raise ValueError(f"{flag} {path}: the folder {path.resolve().parent} is not writable")
     if path.exists() and not overwrite:
         raise ValueError(f"{flag} {path}: the file exists; pass --overwrite to replace it, or choose another name")
 

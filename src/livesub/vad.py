@@ -64,7 +64,7 @@ class EnergyVAD:
 
     def _frame(self, rms: float) -> bool:
         c = self.config
-        level = 20 * np.log10(rms + 1e-10)
+        level = 20 * np.log10(rms + 1e-10) if np.isfinite(rms) else -200.0  # NaN must not become the background
         self.level_db = level
         if level < c.silence_db:
             # Exact zeros (nothing playing) say nothing about the background. Learning a floor of

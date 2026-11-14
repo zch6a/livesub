@@ -175,6 +175,7 @@ class TranslationWorker:
         self.failed = 0
         self.skipped = 0
         self.q: queue.Queue[Cue | None] = queue.Queue()
+        self._closing = False
         self.thread = threading.Thread(target=self._loop, daemon=True, name="livesub-translate")
         self.thread.start()
 
@@ -182,12 +183,13 @@ class TranslationWorker:
         self.q.put(cue)
 
     def close(self, timeout: float | None = None) -> None:
+        self._closing = True  # the stop marker is in the queue from now on: not a line waiting
         self.q.put(None)
         self.thread.join(timeout)
 
     def _loop(self) -> None:
         while (cue := self.q.get()) is not None:
-            if self.q.qsize() >= self.max_backlog:
+            if self.q.qsize() - self._closing >= self.max_backlog:  # (the stop marker counted as a line)
                 self.skipped += 1  # newer lines are waiting: this one would be stale by the time it is done
                 done = cue
             else:

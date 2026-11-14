@@ -1,6 +1,6 @@
 [project]
 name = "livesub"
-version = "0.1.0"
+version = "0.2.0"
 description = "Offline live captions for anything your computer plays or hears, with optional translation: faster-whisper, a caption overlay, SRT/VTT export."
 readme = "README.md"
 license = "MIT"
@@ -21,7 +21,7 @@ all = ["faster-whisper>=1.0", "soundcard>=0.4"]
 livesub = "livesub.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff==0.15.0"]
 
 [build-system]
 requires = ["hatchling"]

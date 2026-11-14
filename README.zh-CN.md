@@ -22,7 +22,7 @@
 - **系统级。** 可以采集扬声器正在播放的声音（Windows 用 WASAPI 回环，Linux 用 monitor 源），也可以用麦克风。
 - **也能出字幕文件。** `livesub file` 为录音（WAV、MP3、M4A、MP4、MKV 等）输出 SRT 或 WebVTT：原文、译文或双语。
 
-> **状态：0.1，开发中。** 已用真实 Whisper 对文字转语音生成的英文和中文语音做过端到端验证，包括快语速、有噪声、有背景音乐和中英夹杂的语音；其余流程（包括实时模式）由 125 个基于合成音频的测试覆盖。作者还没有在真实声卡上测试过实时采集；翻译只对模拟的接口测试过，还没接过真实模型。详见 [POLISH_LOG.md](POLISH_LOG.md)。
+> **状态：0.2，开发中。** 已用真实 Whisper 对文字转语音生成的英文和中文语音做过端到端验证，包括快语速、有噪声、有背景音乐和中英夹杂的语音；其余流程（包括实时模式）由 143 个基于合成音频的测试覆盖。作者还没有在真实声卡上测试过实时采集；翻译只对模拟的接口测试过，还没接过真实模型。详见 [POLISH_LOG.md](POLISH_LOG.md)。
 
 ## 安装
 
@@ -103,7 +103,7 @@ livesub devices
 ```bash
 uv venv && uv pip install numpy pytest
 uv run pytest
-python scripts/mutate.py      # 检验测试本身：植入 71 个 bug，每个都必须让测试失败
+python scripts/mutate.py      # 检验测试本身：植入 76 个 bug，每个都必须让测试失败
 ```
 
 测试是怎么做的、如何在不录任何人声音的情况下用真实 Whisper 检验，见 [CONTRIBUTING.md](CONTRIBUTING.md)。

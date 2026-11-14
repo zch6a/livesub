@@ -191,7 +191,12 @@ def display_times(cues: list[Cue], min_duration: float = 5 / 6, max_duration: fl
         end = min(end, max(c.end, c.start + max_duration))
         if i + 1 < len(cues):
             limit = cues[i + 1].start - FRAME_GAP
-            end = limit if end > limit or limit - end < 0.5 else end
+            if limit - c.start < 0.25:
+                pass  # the next cue starts almost with this one (timing jitter): overlap, not a 1 ms flash
+            elif end > limit:
+                end = limit
+            elif limit - end < 0.5 and limit - c.start <= max(max_duration, c.end - c.start):
+                end = limit  # close a short gap, but not past the longest a cue is shown
         out.append(replace(c, end=max(end, c.start + 0.001)))
     return out
 
@@ -222,6 +227,11 @@ def to_srt(cues: list[Cue], mode: str = "original", max_width: int | None = None
     return "\n".join(blocks)
 
 
+def _vtt_text(text: str) -> str:
+    """WebVTT cue text is markup: "&" and "<" must be escaped, and "-->" may not appear at all."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def to_vtt(cues: list[Cue], mode: str = "original", max_width: int | None = None) -> str:
-    blocks = [f"{_timestamp(c.start, '.')} --> {_timestamp(c.end, '.')}\n{_body(c, mode, max_width)}\n" for c in display_times(cues)]
+    blocks = [f"{_timestamp(c.start, '.')} --> {_timestamp(c.end, '.')}\n{_vtt_text(_body(c, mode, max_width))}\n" for c in display_times(cues)]
     return "WEBVTT\n\n" + "\n".join(blocks)

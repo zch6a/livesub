@@ -1,6 +1,27 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.2.0 — 2026-11-14
+
+Fixes from a review of the whole program, each with a test that fails without it:
+
+- Live mode kept losing the first word of a sentence after a short pause: the new sentence's first word was matched
+  against the old sentence's last ("Thank you." then "you know..."). Words heard before the window count by where
+  they start, and after speech ends the next reading starts a new utterance.
+- One matching word is accepted only at the very start of a reading ("I said no." then "Well no, ..." lost "Well").
+- One NaN or infinite sample (a broken float WAV, a driver glitch) made the voice detector deaf for the whole run.
+- A WAV file cut off in the middle of a sample no longer fails; files with a zero sample rate or no channels are
+  reported by name. A two-hour file is resampled ten seconds at a time (one call took about 14 GB).
+- Cue display times: a cue never flashes for a millisecond when the next starts at almost the same time, and a short
+  gap is closed only up to the longest time a cue is shown. WebVTT text is escaped (`&`, `<`, `-->`).
+- Stopping no longer counts its own stop marker as a line waiting to be translated.
+- `--save` problems (a folder, a folder that is not writable) and the translator's options are checked before a
+  long recording is decoded.
+- The window test runs only in CI or with `LIVESUB_GUI_TESTS=1` (it opens a window). CI installs from the lock file
+  (`uv sync --locked`), with ruff pinned.
+
+143 tests; `scripts/mutate.py` plants 76 bugs, all caught.
+
+## 0.1.0
 
 First version.
 

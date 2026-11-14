@@ -58,7 +58,9 @@ def test_bad_input_is_a_clear_error(tmp_path, monkeypatch, capsys):
 def test_help_and_version(capsys):
     with pytest.raises(SystemExit):
         cli.main(["--version"])
-    assert "livesub 0.1.0" in capsys.readouterr().out
+    from livesub import __version__
+
+    assert f"livesub {__version__}" in capsys.readouterr().out
 
 
 def test_the_live_loop_is_still_available_for_files(recording):

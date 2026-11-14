@@ -1,5 +1,6 @@
 """`livesub live` end to end, with a fake capture device, a scripted recognizer and a fake overlay."""
 
+import os
 import threading
 import time
 
@@ -139,6 +140,8 @@ def test_a_slow_recognizer_reads_the_whole_backlog_at_once_and_loses_nothing(tmp
     assert staleness and max(staleness) < 0.35, staleness
 
 
+@pytest.mark.skipif(not (os.environ.get("CI") or os.environ.get("LIVESUB_GUI_TESTS")),
+                    reason="opens a real window on top of the screen: runs in CI, or locally with LIVESUB_GUI_TESTS=1")
 def test_the_overlay_closes_safely_from_another_thread(monkeypatch):
     pytest.importorskip("tkinter")
     from livesub.overlay import Overlay

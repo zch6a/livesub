@@ -30,9 +30,9 @@ translation underneath.
 - **Subtitle files too.** `livesub file` writes SRT or WebVTT for a recording (WAV, MP3, M4A, MP4, MKV, …):
   original, translated, or both.
 
-> **Status: 0.1, in development.** Recognition has been checked end to end with real Whisper on English
+> **Status: 0.2, in development.** Recognition has been checked end to end with real Whisper on English
 > and Chinese speech from text-to-speech, including fast, noisy, music-backed and mixed-language
-> speech. The rest of the pipeline, live mode included, is covered by 125 tests on synthetic audio. Live
+> speech. The rest of the pipeline, live mode included, is covered by 143 tests on synthetic audio. Live
 > capture from a real sound card has not been tested by the author yet, and translation only against a
 > stand-in endpoint, not a real model. See [POLISH_LOG.md](POLISH_LOG.md).
 
@@ -148,7 +148,7 @@ audio ─▶ resample to 16 kHz ─▶ voice activity ─▶ speech buffer ─(e
 ```bash
 uv venv && uv pip install numpy pytest
 uv run pytest
-python scripts/mutate.py      # test the tests: 71 planted bugs, each must make a test fail
+python scripts/mutate.py      # test the tests: 76 planted bugs, each must make a test fail
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how the tests work and how to check against real Whisper

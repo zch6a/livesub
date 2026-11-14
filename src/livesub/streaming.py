@@ -34,6 +34,7 @@ class Agreement:
         self.last_start = -1.0  # start of the last committed word
         self.last_end = 0.0
         self.ngram = ngram
+        self._fresh = False  # speech just ended: the next guess starts a new utterance
 
     def insert(self, words: list[Word], window_start: float | None = None) -> None:
         """A new guess for the window that starts at `window_start`. Words the committed text already
@@ -46,8 +47,15 @@ class Agreement:
         texts = [norm(w.text) for w in new]
         # Only committed words whose audio is in this window can be repeated by it. After a pause the
         # window starts afresh, and matching the old sentence's last word dropped a new sentence's first
-        # ("Thank you." then "[You] know, ...").
-        heard = self.committed if window_start is None else [w for w in self.committed if w.end > window_start - 0.3]
+        # ("Thank you." then "[You] know, ..."). Judged by where a word *starts*: Whisper stretches the
+        # last word of a reading to the end of its window, so by its end the old sentence's last word
+        # still looked heard after a pause under 1.3 s, and the first word of the next one was lost.
+        if self._fresh:
+            heard: list[Word] = []  # a new utterance: nothing it says can repeat the last one
+        elif window_start is None:
+            heard = self.committed
+        else:
+            heard = [w for w in self.committed if w.start >= window_start - 0.1]
         tail = [norm(w.text) for w in heard[-self.ngram:]]
         start = None
         # 1. After the longest committed tail the guess repeats ("... the cat sat" then "the cat sat on").
@@ -56,8 +64,9 @@ class Agreement:
             hits = [i for i in hits if abs(new[i + k - 1].end - self.last_end) < 2.0]
             if k == 1:
                 # One word is weak evidence: "the" or "的" further on would match the tail and drop the
-                # words before it. Accept it only at the head of the guess, as whisper_streaming does.
-                hits = [i for i in hits if i <= 1]
+                # words before it. Accept it only at the head of the guess (at the second word too, it
+                # threw away the first: "I said no." + "Well no, ..." lost "Well").
+                hits = [i for i in hits if i == 0]
             if hits:
                 start = min(hits, key=lambda i: abs(new[i + k - 1].end - self.last_end)) + k
                 break
@@ -71,6 +80,7 @@ class Agreement:
     def flush(self) -> list[Word]:
         """Commit the words on which the last two guesses agree; returns them."""
         out: list[Word] = []
+        self._fresh = False
         while self.new and self.buffer and norm(self.new[0].text) == norm(self.buffer[0].text):
             out.append(self.new.pop(0))
             self.buffer.pop(0)
@@ -108,6 +118,7 @@ class Agreement:
         """Speech ended: there will be no second opinion, so commit the last guess as it is."""
         out, self.buffer = self.buffer, []
         self._commit(out)
+        self._fresh = True
         return out
 
     def _commit(self, words: list[Word]) -> None:

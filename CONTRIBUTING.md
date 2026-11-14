@@ -8,8 +8,8 @@ useful thing you can send.
 
 ```bash
 git clone https://github.com/zch6a/livesub && cd livesub
-uv venv && uv pip install -e ".[all]" pytest ruff
-uv run pytest            # about 120 tests, no model and no audio device needed
+uv sync --all-extras     # the versions in uv.lock, as CI uses them
+uv run pytest            # about 145 tests, no model and no audio device needed
 uv run ruff check src tests scripts
 uv run python scripts/mutate.py  # plants each bug in its list in turn; every one must make a test fail
 ```
@@ -25,7 +25,8 @@ uv run python scripts/mutate.py  # plants each bug in its list in turn; every on
   readings (times and words) and replay them as a test. `test_replay_of_a_real_whisper_run_loses_no_words`
   is an example.
 - **Live mode with fakes.** `livesub live` is tested end to end with a fake capture device and a fake
-  overlay (`tests/test_live.py`).
+  overlay (`tests/test_live.py`). One test opens the real overlay window for a moment; it runs in CI and
+  is skipped locally unless `LIVESUB_GUI_TESTS=1`, so a test run does not put a window over your screen.
 
 ## Checking against real Whisper
 

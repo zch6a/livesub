@@ -16,7 +16,9 @@ def to_mono(x: np.ndarray) -> np.ndarray:
     x = np.asarray(x, dtype=np.float32)
     if x.ndim == 2:
         x = x.mean(axis=1)
-    return np.ascontiguousarray(x, dtype=np.float32)
+    # NaN or infinity (a broken float file, a driver glitch) would poison every level computed with them:
+    # one NaN in the first frame made the voice detector deaf for the whole run.
+    return np.ascontiguousarray(np.nan_to_num(x, nan=0.0, posinf=1.0, neginf=-1.0), dtype=np.float32)
 
 
 def read_wav(path: str | Path) -> tuple[np.ndarray, int]:
@@ -28,6 +30,10 @@ def read_wav(path: str | Path) -> tuple[np.ndarray, int]:
     except (wave.Error, EOFError) as e:  # a file shorter than a WAV header raises EOFError
         raise ValueError(f"{path}: not a PCM WAV file ({e}); install faster-whisper (pip install 'livesub[whisper]') to read "
                          "other formats, or convert it: ffmpeg -i in.mp4 -ar 16000 -ac 1 out.wav") from e
+    if rate <= 0 or channels <= 0:
+        raise ValueError(f"{path}: not a usable WAV file (sample rate {rate}, {channels} channels)")
+    # A file cut short ends in the middle of a frame: keep the whole frames.
+    raw = raw[: len(raw) - len(raw) % (width * channels)]
     if width == 1:
         x = (np.frombuffer(raw, np.uint8).astype(np.float32) - 128) / 128
     elif width == 2:
@@ -102,7 +108,11 @@ class Resampler:
 
 
 def resample(x: np.ndarray, src: int, dst: int = RATE) -> np.ndarray:
-    return Resampler(src, dst)(x)
+    """A whole recording, ten seconds at a time: in one call the work arrays of a two-hour file took
+    about 14 GB (the output is the same either way)."""
+    r, step = Resampler(src, dst), 10 * src
+    parts = [r(x[i:i + step]) for i in range(0, len(x), step)]
+    return np.concatenate(parts) if parts else np.zeros(0, np.float32)
 
 
 def read_audio(path: str | Path) -> tuple[np.ndarray, int]:
@@ -127,4 +137,4 @@ def read_audio(path: str | Path) -> tuple[np.ndarray, int]:
                 chunks += [f.to_ndarray().reshape(-1) for f in resampler.resample(None)]
         except av.error.FFmpegError as e:
             raise ValueError(f"{path}: cannot read audio from it; is it an audio or video file? ({e})") from e
-        return (np.concatenate(chunks).astype(np.float32) if chunks else np.zeros(0, np.float32)), RATE
+        return (to_mono(np.concatenate(chunks)) if chunks else np.zeros(0, np.float32)), RATE

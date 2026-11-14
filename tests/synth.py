@@ -33,7 +33,8 @@ def render(words: list[Word], duration: float, *, noise_db: float = -65.0, speec
         if b <= a:
             continue
         t = np.arange(b - a) / RATE
-        envelope = np.sin(np.pi * t / (w.end - w.start)) ** 0.5 * (0.7 + 0.3 * np.sin(2 * np.pi * 5 * t))
+        # clipped: at the word's end sin(π·t/d) can be -1e-16, and its square root NaN
+        envelope = np.clip(np.sin(np.pi * t / (w.end - w.start)), 0, None) ** 0.5 * (0.7 + 0.3 * np.sin(2 * np.pi * 5 * t))
         x[a:b] += (rng.standard_normal(b - a) * amp * envelope).astype(np.float32)
     return x
 

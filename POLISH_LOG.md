@@ -192,3 +192,22 @@ livesub goes up the same way: noreply commit email, `main`, public.
 2 places changed: the opening list of four examples joined by 、 and ending in …… (now two pairs), and one semicolon that could be a full stop.
 The checks follow the findings of lieflat-less-ai-tone (shiujan, CC BY-NC 4.0); its findings were applied, none of its text was copied.
 Left as they were: colon-led lists, the parenthesised format and backend lists, the 而不是 sentences that state a real design choice (align by text, balanced line breaks), the tables and code blocks.
+
+### 2026-11-14 — 0.2.0: a whole-program review, and the mutation run after it
+
+The review's fixes are listed in the CHANGELOG; each came with a test in `tests/test_review_fixes.py` that failed
+first. The mutation list gained a mutant for each fix.
+
+**Mutation run**: 72 of 77 caught at first. One entry was stale (the backlog check had changed to count the stop
+marker): updated, caught. Three survived because the new tests did not reach them, and now do:
+- `_fresh` disabled: the test of "Thank you." then "you know" gave the next reading a window start, so the
+  window filter did the work; a test without a window start now shows the new sentence keeping its "you";
+- one matching word accepted at the second word too: no test had a repeated word in second place; "I said no." then
+  "Well no, then" now keeps "Well";
+- the trim of a partial last sample removed: no test read a WAV cut mid-sample; one now does (99 samples of 100).
+One is equivalent and was removed from the list: in `display_times`, the branch that cuts a cue at the next one's
+start; when it would apply, the branch after it does the same (a cue running past the next start is either within
+the longest display time or longer than it itself). Now 76 of 76 are caught (the three new tests and the updated
+entry checked one by one; the rest in the full run).
+
+143 tests (1 skipped outside CI: the window test).

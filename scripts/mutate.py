@@ -6,7 +6,9 @@ The unmutated suite must pass first; otherwise every mutant would look "caught".
 never modified: the code is copied to a temporary folder.
 
 Left out as equivalent: starting a speech region where the VAD noticed speech rather than a few frames
-earlier (the 1 s padding covers the difference).
+earlier (the 1 s padding covers the difference); in display_times, the branch that cuts a cue at the next one's
+start (the branch after it does the same whenever the first would: a cue that runs past the next one's start is
+either under the longest time a cue is shown, or itself longer).
 """
 
 from __future__ import annotations
@@ -43,7 +45,8 @@ MUTANTS = [
     ("src/livesub/streaming.py", "while self.new and self.buffer and norm(self.new[0].text) == norm(self.buffer[0].text):", "while self.new and self.buffer:"),
     ("src/livesub/streaming.py", 'return re.sub(r"[^\\w]", "", text.lower())', "return text"),
     ("src/livesub/streaming.py", "out, self.buffer = self.buffer, []", "out, self.buffer = [], []"),
-    ("src/livesub/streaming.py", "heard = self.committed if window_start is None else [w for w in self.committed if w.end > window_start - 0.3]", "heard = self.committed"),
+    ("src/livesub/streaming.py", "heard = [w for w in self.committed if w.start >= window_start - 0.1]", "heard = [w for w in self.committed if w.end > window_start - 0.3]"),
+    ("src/livesub/streaming.py", "if self._fresh:", "if False:"),
     # captions
     ("src/livesub/captions.py", "return sum(2 if is_wide(c) else 0 if unicodedata.combining(c) else 1 for c in text)", "return len(text)"),
     ("src/livesub/captions.py", "if line and width(line + piece) > max_width and tok[0] not in NO_LINE_START:", "if line and width(line + piece) > max_width:"),
@@ -77,8 +80,13 @@ MUTANTS = [
     ("src/livesub/captions.py", "        lines = _balanced(text, max_width) or lines", "        pass"),
     ("src/livesub/captions.py", "if line[-1] in NO_LINE_END and len(line) > 1:", "if False:"),
     ("src/livesub/captions.py", "reading = chars / (9 if is_cjk_text(c.text) else 20)", "reading = 0.0"),
-    ("src/livesub/captions.py", "end = limit if end > limit or limit - end < 0.5 else end", "end = min(end, cues[i + 1].start)"),
-    ("src/livesub/streaming.py", "hits = [i for i in hits if i <= 1]", "pass"),
+    ("src/livesub/captions.py", "if limit - c.start < 0.25:", "if False:"),
+    ("src/livesub/captions.py", 'return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")', "return text"),
+    ("src/livesub/vad.py", "if np.isfinite(rms) else -200.0", "if True else -200.0"),
+    ("src/livesub/pipeline.py", "if self.q.qsize() - self._closing >= self.max_backlog:", "if self.q.qsize() >= self.max_backlog:"),
+    ("src/livesub/cli.py", "if path.is_dir():", "if False:"),
+    ("src/livesub/audio.py", "raw = raw[: len(raw) - len(raw) % (width * channels)]", "pass"),
+    ("src/livesub/streaming.py", "hits = [i for i in hits if i == 0]", "hits = [i for i in hits if i <= 1]"),
     ("src/livesub/pipeline.py", "cut = self.agreement.sentence_cut(after=self._buf_start + 1.0) or self.agreement.cut_point()", "cut = self.agreement.cut_point()"),
     ("src/livesub/pipeline.py", "cut = _quietest(levels, frame, a + 0.8 * max_len, a + max_len)", "cut = a + max_len"),
     ("src/livesub/cli.py", "temperature = 0.0 if args.command == \"live\" else (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)", "temperature = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)"),
@@ -95,7 +103,7 @@ MUTANTS = [
     ("src/livesub/cli.py", "    t.check()", "    pass"),
     ("src/livesub/live.py", "            hurry = True  # a second Ctrl+C: skip the last reading, but still save what there is", "            raise"),
     ("src/livesub/live.py", "            sys.stdout.reconfigure(errors=\"replace\")", "            pass"),
-    ("src/livesub/pipeline.py", "            if self.q.qsize() >= self.max_backlog:", "            if False:"),
+    ("src/livesub/pipeline.py", "            if self.q.qsize() - self._closing >= self.max_backlog:", "            if False:"),
     # translation
     ("src/livesub/translate.py", "return urllib.request.build_opener(urllib.request.ProxyHandler({}))", "return urllib.request.build_opener()"),
     ("src/livesub/translate.py", 'text = re.sub(r"<think>.*?</think>", "", reply, flags=re.S | re.I)', "text = reply"),
